@@ -1,5 +1,5 @@
 import { loadStackPrismRules } from './rule-loader'
-import { normalizeSettings } from '@/utils/normalize-settings'
+import { normalizeSettings, normalizeSettingsWithLocalOptIn } from '@/utils/normalize-settings'
 
 export const SETTINGS_STORAGE_KEY = 'stackPrismSettings'
 
@@ -25,8 +25,9 @@ export const loadDetectorSettings = async () => {
   if (!detectorSettingsPromise) {
     detectorSettingsPromise = chrome.storage.sync
       .get(SETTINGS_STORAGE_KEY)
-      .then(stored => {
-        detectorSettingsCache = normalizeSettings(stored[SETTINGS_STORAGE_KEY])
+      .then(async stored => {
+        const local = await chrome.storage.local.get(SETTINGS_STORAGE_KEY)
+        detectorSettingsCache = normalizeSettingsWithLocalOptIn(stored[SETTINGS_STORAGE_KEY], local[SETTINGS_STORAGE_KEY])
         return detectorSettingsCache
       })
       .catch(() => {
