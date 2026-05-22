@@ -23,6 +23,11 @@ export default defineManifest({
       matches: ['http://*/*', 'https://*/*'],
       js: ['src/content/content-observer.ts'],
       run_at: 'document_idle'
+    },
+    {
+      matches: ['http://127.0.0.1/*'],
+      js: ['src/content/agent-bridge-client.ts'],
+      run_at: 'document_idle'
     }
   ],
   action: {
