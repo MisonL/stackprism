@@ -14,6 +14,7 @@ import {
 import { loadDetectorSettings, loadTechRules } from './detector-settings'
 import { categoryIndex, confidenceRank } from '@/utils/category-order'
 import { cleanTechnologyUrl } from '@/utils/url'
+import { isSameSite } from '@/utils/domain'
 import { cleanStringArray } from '@/utils/normalize-settings'
 import { normalizeTechName } from '@/utils/tech-name'
 import { checkPageSupport } from '@/utils/page-support'
@@ -241,10 +242,15 @@ const mergeDisplayTechnologyRecords = (items: any[]) => {
 
 const collectRawReferenceTechnologies = (data: any) => {
   const items: any[] = []
+  const pageUrl = data.page?.url || data.dynamic?.url || data.main?.url || ''
   addAllTechnologies(items, data.page?.technologies)
   addAllTechnologies(items, data.main?.technologies)
-  for (const api of data.apis || []) addAllTechnologies(items, api.technologies)
-  for (const frame of data.frames || []) addAllTechnologies(items, frame.technologies)
+  for (const api of data.apis || []) {
+    if (isSameSite(api.url, pageUrl)) addAllTechnologies(items, api.technologies)
+  }
+  for (const frame of data.frames || []) {
+    if (isSameSite(frame.url, pageUrl)) addAllTechnologies(items, frame.technologies)
+  }
   addAllTechnologies(items, data.bundle?.technologies)
   return items
 }
@@ -349,10 +355,14 @@ const shortHostFromUrl = (url: string): string => {
 
 const buildDisplayTechnologies = (data: any, settings: any, suppressMap: Record<string, string[]>) => {
   const all: any[] = []
+  const pageUrl = data.page?.url || data.dynamic?.url || data.main?.url || ''
   addAllTechnologies(all, data.page?.technologies)
   addAllTechnologies(all, data.main?.technologies)
   addAllTechnologies(all, collectHttpProtocolTechs(data))
+  // 跨可注册域的 API / iframe 响应头只代表第三方（公共 CDN、三方服务）自身的基建，
+  // 不算本站技术栈；同站子域（含前后端分离的 api.* 子域）仍计入。
   for (const api of data.apis || []) {
+    if (!isSameSite(api.url, pageUrl)) continue
     addAllTechnologies(
       all,
       (api.technologies || []).map((tech: any) => ({
@@ -362,6 +372,7 @@ const buildDisplayTechnologies = (data: any, settings: any, suppressMap: Record<
     )
   }
   for (const frame of data.frames || []) {
+    if (!isSameSite(frame.url, pageUrl)) continue
     addAllTechnologies(
       all,
       (frame.technologies || []).map((tech: any) => ({
@@ -384,7 +395,6 @@ const buildDisplayTechnologies = (data: any, settings: any, suppressMap: Record<
       source: tech.source || 'JS 版权注释'
     }))
   )
-  const pageUrl = data.page?.url || data.dynamic?.url || data.main?.url || ''
   return filterTechnologiesBySettings(
     suppressSelfHostTechs(
       suppressGenericFrontendLibDuplicates(suppressGenericCdnFallbacks(mergeDisplayTechnologyRecords(all))),
