@@ -3,7 +3,8 @@ import path from 'node:path'
 
 const ENTRIES = {
   'page-detector': 'src/injected/page-detector.ts',
-  'page-source-search': 'src/injected/page-source-search.ts'
+  'page-source-search': 'src/injected/page-source-search.ts',
+  'experience-profiler': 'src/injected/experience-profiler.ts'
 } as const
 
 type EntryName = keyof typeof ENTRIES

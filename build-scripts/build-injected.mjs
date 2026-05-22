@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 const root = resolve(__dirname, '..')
 
-const entries = ['page-detector', 'page-source-search']
+const entries = ['page-detector', 'page-source-search', 'experience-profiler']
 
 const outDir = resolve(root, 'public/injected')
 rmSync(outDir, { recursive: true, force: true })
@@ -17,8 +17,7 @@ for (const entry of entries) {
   const result = spawnSync('pnpm', ['exec', 'vite', 'build', '--config', 'vite.injected.config.ts'], {
     cwd: root,
     stdio: 'inherit',
-    env: { ...process.env, INJECTED_ENTRY: entry },
-    shell: true
+    env: { ...process.env, INJECTED_ENTRY: entry }
   })
   if (result.status !== 0) {
     process.exit(result.status ?? 1)
