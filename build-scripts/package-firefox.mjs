@@ -1,8 +1,9 @@
 import { cpSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { resolve, dirname, basename } from 'node:path'
 import { execFileSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 
-const root = resolve(import.meta.dirname, '..')
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const distDir = resolve(root, 'dist')
 const firefoxDir = resolve(root, 'dist-firefox')
 
@@ -32,12 +33,20 @@ const parseAllImportBindings = (code) => {
     })
     imports.push({ path: match[2], bindings })
   }
+  if (!imports.length && /import\s/.test(code)) {
+    throw new Error('[package-firefox] unsupported import syntax in entry chunk — cannot inline')
+  }
   return imports
 }
 
 const parseExportBindings = (code) => {
   const match = code.match(/export\{([^}]*)\};?\s*$/)
-  if (!match) return []
+  if (!match) {
+    if (/export\s/.test(code)) {
+      throw new Error('[package-firefox] unsupported export syntax in shared chunk — cannot inline')
+    }
+    return []
+  }
   return match[1].split(',').map(s => {
     const parts = s.trim().split(/\s+as\s+/)
     return { local: parts[0].trim(), exported: (parts[1] || parts[0]).trim() }

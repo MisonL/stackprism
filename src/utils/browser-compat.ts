@@ -19,9 +19,11 @@ export const compatStorage = {
       if (await checkSessionSupport()) {
         return chrome.storage.session.get(key)
       }
-      const result = await chrome.storage.local.get(SESSION_PREFIX + key)
-      const raw = result[SESSION_PREFIX + key]
-      return raw ? { [key]: raw } : {}
+      const storageKey = SESSION_PREFIX + key
+      const result = await chrome.storage.local.get(storageKey)
+      return Object.prototype.hasOwnProperty.call(result, storageKey)
+        ? { [key]: result[storageKey] }
+        : {}
     },
     set: async (items: Record<string, unknown>): Promise<void> => {
       if (await checkSessionSupport()) {
