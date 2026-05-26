@@ -83,6 +83,18 @@ pnpm run build:firefox # Firefox 构建 + .xpi 打包
 pnpm run docs:dev     # VitePress 文档站本地预览
 ```
 
+### Agent Bridge
+
+Agent Bridge 是可选的本机能力：用户在扩展设置中显式启用后，本机 AI Agent 可以通过 `127.0.0.1` bridge 获取 `stackprism.site_experience_profile.v1`，用于参考目标站点的技术、视觉、布局、组件、交互、UX 和资源摘要。
+
+本能力默认关闭，启用状态只保存在当前浏览器 profile 的本机 `chrome.storage.local`，不会随 Chrome sync 同步到其他设备或其他 profile。换设备、换浏览器 profile 或重装扩展后，需要重新显式开启。
+
+Agent Bridge 使用 passive capture：不会点击页面、提交表单、登录账号或执行破坏性操作；`viewports` 只写入 profile 请求上下文，不是 CDP 移动仿真或真实手机截图。若 StackPrism 安装在非默认浏览器或非默认 profile，本机 Agent 需要通过 `STACKPRISM_BROWSER_OPEN_COMMAND` 指向对应 Chrome 内核浏览器，并用 `STACKPRISM_BROWSER_OPEN_ARGS_JSON` JSON 字符串数组传入用户 profile 参数，bridge URL 永远由脚本作为最后一个参数追加。未开启时会返回 `AGENT_BRIDGE_DISABLED`；打开到错误浏览器或 profile 时通常会返回 `EXTENSION_NOT_CONNECTED`。
+
+本能力不做远程上传，不采集 Cookie、Authorization、localStorage/sessionStorage 明文或完整敏感文本。第一版信任本机用户启动的 bridge 进程，不防同机恶意进程或同浏览器 profile 中其他恶意扩展。Agent 读取 profile 后应优先参考体验结构和可观测事实，不盲目照搬目标站点私有技术实现。
+
+开发文档见 [docs/dev/agent-bridge.md](docs/dev/agent-bridge.md)。
+
 ## 规则维护
 
 栈棱镜的规则系统是数据驱动的——绝大多数检测改规则 JSON 即可,无需碰代码。
