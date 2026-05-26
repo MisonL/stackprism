@@ -9,7 +9,8 @@ import { assert, createBrowserSmokeHarness, redactText } from './helpers/agent-b
 const root = resolve(new URL('..', import.meta.url).pathname)
 const dist = resolve(root, 'dist')
 const cdpPort = Number(process.env.STACKPRISM_BROWSER_SMOKE_CDP_PORT || 9451)
-const targetUrl = process.env.STACKPRISM_BROWSER_SMOKE_TARGET_URL || 'https://example.com'
+const configuredTargetUrl = process.env.STACKPRISM_BROWSER_SMOKE_TARGET_URL || ''
+const externalTargetUrl = configuredTargetUrl || 'https://www.wikipedia.org/'
 const scenario = process.env.STACKPRISM_BROWSER_SMOKE_SCENARIO || 'default'
 const cdpBaseUrl = `http://127.0.0.1:${cdpPort}`
 
@@ -1495,9 +1496,9 @@ const runPublicComplexTargetScenario = async () => {
     await harness.setAgentBridgeEnabled(worker, true)
     bridge = await harness.startBridge()
 
-    const targetResolution = await resolveTargetAddresses(targetUrl)
+    const targetResolution = await resolveTargetAddresses(externalTargetUrl)
     const capture = await harness.createCapture(bridge.ready, {
-      url: targetUrl,
+      url: externalTargetUrl,
       include: ['tech', 'visual', 'layout', 'components', 'interaction', 'ux', 'assets'],
       waitMs: 1000,
       options: {
@@ -1534,7 +1535,7 @@ const runPublicComplexTargetScenario = async () => {
           dist,
           scenario,
           target: {
-            requestedUrl: targetUrl,
+            requestedUrl: externalTargetUrl,
             resolvedHostname: targetResolution.hostname,
             resolvedAddresses: targetResolution.addresses,
             dnsError: targetResolution.dnsError || '',
@@ -2018,7 +2019,7 @@ const runBridgeIframeBlockedScenario = async () => {
     const version = await harness.waitForCdp()
     bridge = await harness.startBridge()
     const capture = await harness.createCapture(bridge.ready, {
-      url: targetUrl,
+      url: externalTargetUrl,
       options: { allowPrivateNetworkTarget: true, captureScreenshotMetadata: false, keepTabOpen: false, targetMode: 'new_tab' }
     })
     assert(capture.status === 200, `Capture creation failed: ${JSON.stringify(capture)}`)
@@ -3216,18 +3217,9 @@ const run = async () => {
     assert(disabledProbe.requestCount() === 0, 'Disabled opt-in opened or fetched the target URL.')
 
     await harness.setAgentBridgeEnabled(worker, true)
-    const example = await harness.createCapture(bridge.ready, { url: targetUrl })
-    assert(example.status === 200, 'Example capture creation failed.')
-    const exampleDriven = await harness.driveCapture(bridge.ready, example)
-    assert(exampleDriven.finalStatus?.status === 'completed', 'Example capture did not complete.')
-    const deleteCompleted = await harness.fetchJson(`${bridge.ready.baseUrl}/v1/captures/${example.body.id}`, {
-      method: 'DELETE',
-      headers: { authorization: `Bearer ${bridge.ready.apiToken}` }
-    })
-    assert(deleteCompleted.status === 409, 'Deleting completed capture did not return 409.')
-
+    const defaultTargetUrl = fixture.url
     const fixtureCapture = await harness.createCapture(bridge.ready, {
-      url: fixture.url,
+      url: defaultTargetUrl,
       waitMs: 100,
       options: { allowPrivateNetworkTarget: true, maxResourceUrls: 50, captureScreenshotMetadata: false }
     })
@@ -3237,6 +3229,11 @@ const run = async () => {
       fixtureDriven.finalStatus?.status === 'completed',
       `Fixture capture did not complete: ${JSON.stringify(fixtureDriven.finalStatus)}`
     )
+    const deleteCompleted = await harness.fetchJson(`${bridge.ready.baseUrl}/v1/captures/${fixtureCapture.body.id}`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${bridge.ready.apiToken}` }
+    })
+    assert(deleteCompleted.status === 409, 'Deleting completed capture did not return 409.')
 
     const fixtureMetadataCapture = await harness.createCapture(bridge.ready, {
       url: fixture.url,
@@ -3355,7 +3352,11 @@ const run = async () => {
 
     renderGuardBridge = await harness.startBridge()
     const securityBridge = renderGuardBridge.ready
-    const terminalRenderCapture = await harness.createCapture(securityBridge, { url: targetUrl })
+    const terminalRenderCapture = await harness.createCapture(securityBridge, {
+      url: defaultTargetUrl,
+      waitMs: 100,
+      options: { allowPrivateNetworkTarget: true, maxResourceUrls: 50, captureScreenshotMetadata: false }
+    })
     assert(terminalRenderCapture.status === 200, 'Terminal render guard capture creation failed.')
     const terminalDelete = await harness.fetchJson(`${securityBridge.baseUrl}/v1/captures/${terminalRenderCapture.body.id}`, {
       method: 'DELETE',
@@ -3371,7 +3372,11 @@ const run = async () => {
     const terminalRenderText = await terminalRender.text()
     assert(terminalRender.status === 409 && !terminalRenderText.includes('spbt_'), 'Terminal bridge render exposed a token.')
 
-    const renderCapture = await harness.createCapture(securityBridge, { url: targetUrl })
+    const renderCapture = await harness.createCapture(securityBridge, {
+      url: defaultTargetUrl,
+      waitMs: 100,
+      options: { allowPrivateNetworkTarget: true, maxResourceUrls: 50, captureScreenshotMetadata: false }
+    })
     assert(renderCapture.status === 200, 'Render guard capture creation failed.')
     const crossSite = await fetch(renderCapture.body.bridgeUrl, { headers: { referer: 'https://attacker.example/page' } })
     const crossSiteText = await crossSite.text()
@@ -3400,11 +3405,12 @@ const run = async () => {
         targetRequestCount: disabledProbe.requestCount(),
         syncLegacyEnabledIgnored: true
       },
-      example: {
-        status: exampleDriven.finalStatus.status,
-        phase: exampleDriven.finalStatus.phase,
+      defaultTarget: {
+        url: defaultTargetUrl,
+        status: fixtureDriven.finalStatus.status,
+        phase: fixtureDriven.finalStatus.phase,
         deleteCompletedStatus: deleteCompleted.status,
-        profile: profileSummary(exampleDriven.profile, example.body.id)
+        profile: profileSummary(fixtureDriven.profile, fixtureCapture.body.id)
       },
       fixture: {
         status: fixtureDriven.finalStatus.status,
@@ -3469,10 +3475,10 @@ const run = async () => {
           targetStillVisible: serviceWorkerStopped.targetStillVisible
         }
       },
-      bridgeDom: exampleDriven.dom,
+      bridgeDom: fixtureDriven.dom,
       bridgeStderrTail: redactText(bridge.stderr().slice(-500))
     }
-    assert(summary.example.profile?.schema === 'stackprism.site_experience_profile.v1', 'Example profile schema mismatch.')
+    assert(summary.defaultTarget.profile?.schema === 'stackprism.site_experience_profile.v1', 'Default target profile schema mismatch.')
     assert(summary.fixture.profile?.schema === 'stackprism.site_experience_profile.v1', 'Fixture profile schema mismatch.')
     assert(summary.fixtureMetadata.profile?.schema === 'stackprism.site_experience_profile.v1', 'Fixture metadata profile schema mismatch.')
     assert(summary.largeProfile.profile?.schema === 'stackprism.site_experience_profile.v1', 'Large profile schema mismatch.')
@@ -3481,7 +3487,7 @@ const run = async () => {
       'Custom open command profile schema mismatch.'
     )
     assert(
-      !summary.example.profile.privacyLeakDetected &&
+      !summary.defaultTarget.profile.privacyLeakDetected &&
         !summary.fixture.profile.privacyLeakDetected &&
         !summary.fixtureMetadata.profile.privacyLeakDetected &&
         !summary.largeProfile.profile.privacyLeakDetected &&
@@ -3489,12 +3495,12 @@ const run = async () => {
       'Profile privacy leak marker detected.'
     )
     assert(
-      !summary.example.profile.screenshotMetadataPresent && !summary.fixture.profile.screenshotMetadataPresent,
+      !summary.defaultTarget.profile.screenshotMetadataPresent && !summary.fixture.profile.screenshotMetadataPresent,
       'Screenshot metadata was present even though captureScreenshotMetadata=false.'
     )
     assert(summary.fixtureMetadata.profile.screenshotMetadataPresent, 'Screenshot metadata was missing when requested.')
     assert(
-      !summary.example.profile.screenshotPayloadPresent &&
+      !summary.defaultTarget.profile.screenshotPayloadPresent &&
         !summary.fixture.profile.screenshotPayloadPresent &&
         !summary.fixtureMetadata.profile.screenshotPayloadPresent &&
         !summary.largeProfile.profile.screenshotPayloadPresent &&

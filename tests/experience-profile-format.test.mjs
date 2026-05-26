@@ -30,6 +30,20 @@ test('experience profiler preserves matched selector metadata for bounding boxes
   assert.doesNotMatch(source, /selector:\s*element\.tagName/)
 })
 
+test('experience profiler collects language and first-order UX categories', async () => {
+  const source = await readFile(new URL('../src/injected/experience-profiler.ts', import.meta.url), 'utf8')
+
+  assert.match(source, /documentElement\.lang/)
+  assert.match(source, /pagePurpose/)
+  assert.match(source, /primaryUserPath/)
+  assert.match(source, /informationHierarchy/)
+  assert.match(source, /ctaStrategy/)
+  assert.match(source, /trustSignals/)
+  assert.match(source, /navigationDepth/)
+  assert.match(source, /contentGrouping/)
+  assert.match(source, /frictionPoints/)
+})
+
 test('site experience fixture covers visual, layout, component and sensitive text cases', async () => {
   const fixture = await readFile(new URL('./fixtures/site-experience-fixture.html', import.meta.url), 'utf8')
 

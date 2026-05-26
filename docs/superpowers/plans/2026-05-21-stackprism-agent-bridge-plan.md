@@ -10,6 +10,14 @@
 
 ---
 
+## 当前实现状态
+
+- 可用第一版已落地：扩展端 opt-in、bridge tab/session 隔离、capture orchestration、profile transfer、JS bridge、Python fallback、repo-local skill、release hygiene 和主要自动化契约均已实现。
+- 不能按原计划标记为全量完成：原计划仍有外部发布和 live browser gate，不能仅凭本机单元测试或 fixture smoke 关闭全部 gate。
+- 本机已收敛：本轮补齐 profile 语言字段、UX 一阶分类白名单、默认 browser smoke fixture-backed 成功路径、Task 10 状态矩阵，以及开发文档和审计文档的 gate 口径。
+- 外部或未触发 gate：Chrome Web Store / Edge Add-ons 更新链路和商店披露、运行中 idle-driven service worker eviction、精确 incognito `INCOGNITO_NOT_SUPPORTED` live 浏览器元数据路径、更广 DNS/private-network 和长时资源压力矩阵仍需保留为未完成边界。
+- 下方 Task 1 到 Task 9 保留为历史实施计划，不再作为当前完成状态来源；当前状态以本节、Task 10 状态矩阵和 `docs/reviews/CR-AGENT-BRIDGE-*.md` 为准。
+
 ## 总目标
 
 让 AI Agent 在用户已安装 StackPrism 插件的普通 Chrome 内核浏览器中，无需用户复制、下载或点击插件按钮，即可通过本地 HTTP 接口获得目标网站的 Site Experience Profile，用于实现相似视觉效果、UI/UX 体验、交互行为和必要的技术选型参考。
@@ -150,7 +158,7 @@ Capture request validation:
 
 ```json
 {
-  "url": "https://example.com",
+  "url": "https://target.example",
   "mode": "experience",
   "waitMs": 3000,
   "viewports": [
@@ -435,8 +443,8 @@ Persisted extension state:
   "bridgeWindowId": 7,
   "targetTabId": 102,
   "targetWindowId": 7,
-  "targetUrl": "https://example.com/",
-  "finalUrl": "https://example.com/",
+  "targetUrl": "https://target.example/",
+  "finalUrl": "https://target.example/",
   "targetMode": "reuse_or_new_tab",
   "createdByCapture": true,
   "keepTabOpen": false,
@@ -482,7 +490,7 @@ Persisted extension state:
 - `loadError`: only when the browser reports a main-frame load failure; contains sanitized extension error code/category, not the full failing URL query.
 - `origin`
 - `title`
-- `language`
+- `language`: from page language attributes when available; empty string when unknown, not inferred from account or locale data.
 - `viewportProfiles`
 - `captureScope`: `current_page`, `target_url`, or `same_origin_flow`
 
@@ -583,6 +591,7 @@ Interaction rule:
 - `navigationDepth`
 - `contentGrouping`
 - `frictionPoints`: only observable UX risks, not speculative private intent
+- `textSamples`: bounded short labels or summaries only; no full visible text or private account content
 
 Text privacy rule:
 
@@ -1190,93 +1199,76 @@ Frame and shadow DOM rule:
 
 **Files:**
 
-- Create: `docs/reviews/CR-AGENT-BRIDGE-E2E-2026-05-22.md`
-- No other new files unless fixing defects.
+- Existing: `docs/reviews/CR-AGENT-BRIDGE-E2E-2026-05-22.md`
+- Existing: `docs/reviews/CR-AGENT-BRIDGE-COMPLETION-AUDIT-2026-05-24.md`
+- No new review file unless a later validation run needs a new dated audit.
 
-- [ ] 确认 `docs/reviews/` 存在；若不存在先创建该目录，再写入 E2E 报告。
-- [ ] 运行 `pnpm run build:injected`，先生成 `public/injected/*.iife.js`；干净 checkout 中该目录被 `.gitignore` 忽略，必须在依赖构建产物的单元测试前生成。
-- [ ] 运行 `pnpm run test:unit`。
-- [ ] 运行 `pnpm run lint`。
-- [ ] 分别运行 `pnpm exec prettier --file-info agent-skill/stackprism-site-experience/scripts/stackprism-bridge.mjs`、`pnpm exec prettier --file-info agent-skill/stackprism-site-experience/scripts/bridge/http-server.mjs` 和 `pnpm exec prettier --file-info docs/reviews/CR-AGENT-BRIDGE-E2E-2026-05-22.md`，确认三次返回 JSON 中 `"ignored": false`；`prettier --file-info` 不能接多个文件。
-- [ ] 运行 `pnpm exec prettier --check build-scripts/build-injected.mjs vite.injected.config.ts tests/*.test.mjs tests/helpers/load-ts-module.mjs tests/fixtures/*.json tests/fixtures/*.html agent-skill/stackprism-site-experience/SKILL.md agent-skill/stackprism-site-experience/README.md agent-skill/stackprism-site-experience/agents/openai.yaml agent-skill/stackprism-site-experience/scripts/stackprism-bridge.mjs agent-skill/stackprism-site-experience/scripts/bridge/*.mjs agent-skill/stackprism-site-experience/references/site-experience-profile-schema.md agent-skill/stackprism-site-experience/references/agent-consumption-guide.md docs/dev/agent-bridge.md docs/dev/index.md docs/dev/architecture.md docs/dev/detection-flow.md docs/dev/release.md docs/.vitepress/config.ts README.md PRIVACY.md docs/guide/basic-usage.md docs/reviews/CR-AGENT-BRIDGE-E2E-2026-05-22.md`。不要把 Python fallback 交给 Prettier。
-- [ ] 运行 `pnpm run typecheck`。
-- [ ] 运行 `pnpm run build`。
-- [ ] 运行 `pnpm run docs:build`。
-- [ ] 运行 `node --check agent-skill/stackprism-site-experience/scripts/stackprism-bridge.mjs`。
-- [ ] 运行 `for f in agent-skill/stackprism-site-experience/scripts/bridge/*.mjs; do node --check "$f"; done`。
-- [ ] 运行 `python3 -m py_compile agent-skill/stackprism-site-experience/scripts/stackprism_bridge.py`。
-- [ ] 运行 `python3 -m compileall -q agent-skill/stackprism-site-experience/scripts/stackprism_bridge_lib`。
-- [ ] 运行 `node --test --test-timeout=60000 tests/stackprism-bridge.test.mjs`。
-- [ ] 运行 `node --test --test-timeout=60000 tests/stackprism_bridge_py.test.mjs`。
-- [ ] 加载 `dist/` 到 Chrome/Edge。
-- [ ] 启动 JS bridge 脚本。
-- [ ] 从启动 JSON line 提取 `baseUrl` 和 `apiToken`，设置 `STACKPRISM_BRIDGE_BASE_URL` 与 `STACKPRISM_BRIDGE_TOKEN`。
-- [ ] 使用被占用端口启动一次 JS bridge，确认进程非零退出、stdout 没有 ready JSON、stderr 只包含脱敏 `PORT_IN_USE` 摘要。
-- [ ] 使用非法 `STACKPRISM_BRIDGE_PORT`、包含 NUL 字符的 browser open 配置分别启动一次 JS/Python bridge，确认进程非零退出、stdout 没有 ready JSON、stderr 只包含脱敏 `BRIDGE_INVALID_ENV` 摘要，且未生成 token；另用非法 `STACKPRISM_BROWSER_OPEN_ARGS_JSON` 创建 capture，确认按既有约定返回 `BROWSER_OPEN_FAILED`。
-- [ ] 用 `curl` 创建 capture：
-  ```bash
-  curl --max-time 60 -sS -X POST "${STACKPRISM_BRIDGE_BASE_URL}/v1/captures" \
-    -H 'content-type: application/json' \
-    -H "authorization: Bearer ${STACKPRISM_BRIDGE_TOKEN}" \
-    -d '{"url":"https://example.com","mode":"experience","waitMs":1000,"include":["tech","visual","layout","components","interaction","ux","assets"]}'
-  ```
-- [ ] 带相同 Bearer token 轮询 profile endpoint，轮询总时长不得超过 70 秒，单次 `curl` 使用 `--max-time 10`；确认返回 `stackprism.site_experience_profile.v1`，超时则记录最后一次状态响应和 bridge stderr 脱敏摘要。
-- [ ] 对已经 `completed`、`failed`、`cancelled`、`expired` 的 capture 分别调用 `DELETE /v1/captures/{id}`，确认都返回 `409` 和当前终态，避免把完成结果、失败原因或过期状态误改写。
-- [ ] 另建一个尚未 completed 的长运行 capture，再调用 `DELETE /v1/captures/{id}` 验证插件收到 cancel control，自己创建的目标 tab 被关闭，用户原有 tab 不被关闭。
-- [ ] 对同一个未完成 capture 模拟插件不确认取消，确认 `cancel_requested` 10 秒后转为 `cancelled`，且 late status 不能覆盖终态。
-- [ ] 模拟关闭 bridge tab 和目标 tab，确认分别返回 `BRIDGE_TAB_CLOSED` 与 `TARGET_TAB_CLOSED`。
-- [ ] 模拟或手动触发 extension service worker 重启，确认未完成 capture 会通过 bridge content script 上报 `SERVICE_WORKER_RESTARTED` 或 `BRIDGE_TRANSPORT_DISCONNECTED`，且插件自己创建的目标 tab 被清理。
-- [ ] 模拟扩展 reload/update、用户禁用扩展或 `chrome.storage.session` 被清空后的恢复入口，确认未完成 capture 不会被伪恢复，残留 agent capture state 被清理，插件自己创建的目标 tab 被关闭，Agent 最终看到结构化失败或 bridge timeout/expired。
-- [ ] 模拟 service worker 在 deadline 前后重启或恢复，确认扩展侧不依赖丢失的内存 timer：过期 capture 在下一次事件或模块初始化时被 reconciliation helper fail closed，未过期 capture 也不会被误标完成。
-- [ ] 测试目标站点重定向到被拒绝 final URL 时，bridge 在 `target_loaded` 阶段返回 `FINAL_URL_BLOCKED`，插件不会继续注入主动检测或 experience profiler。
-- [ ] 检查 profile 不含 cookie、authorization、set-cookie 明文。
-- [ ] 检查 profile 资源 URL 不含敏感 query 参数、签名 URL、hash 和 token-like 参数值。
-- [ ] 检查大页面或 fixture 扩展样本触发截断时，profile 包含 `evidence.truncation` 和 limitation，而不是返回超限失败或静默丢字段。
-- [ ] 用大 fixture 触发多片 profile transfer，确认 background 按 `384 * 1024` bytes raw payload 分片、bridge content script 逐片 ack、重组后 sha256 匹配，并且最终 profile endpoint 返回 `stackprism.site_experience_profile.v1`。
-- [ ] 模拟 profile transfer 缺片、ack 超时、sha256 mismatch、错误 `sessionId`/`nonce` 和非法 `payloadBase64`，确认分别返回 `PROFILE_CHUNK_MISSING`、`PROFILE_TRANSPORT_FAILED` 或 `PROFILE_HASH_MISMATCH`，且不会让 Agent 只轮询到 `CAPTURE_TIMEOUT`。
-- [ ] 模拟 request endpoint 返回错误 `captureId`、`sessionId`、`nonce` 或 `protocolVersion`，确认 bridge content script 上报 `BRIDGE_REQUEST_MISMATCH`，且 background 未收到 `START_AGENT_CAPTURE`。
-- [ ] 模拟 extension capabilities 缺失 `profileChunkTransport` 或 `storageSession`，确认 capture 失败为 `NOT_SUPPORTED` 且不会打开目标 tab。
-- [ ] 对同一 capture 重复 POST profile 和提交超过 8 MB 的 profile body，确认分别返回 `NONCE_REUSED` 或 `CAPTURE_ALREADY_COMPLETED`、`PROFILE_TOO_LARGE`。
-- [ ] 用只包含 `["tech"]` 的 capture 验证 experience profiler 不运行，visual/layout/components/interaction/ux/assets 返回空对象并带 `section_not_requested` limitation。
-- [ ] 模拟目标页主 frame 加载失败，确认返回 `TARGET_LOAD_FAILED`，不会把浏览器错误页写入 profile。
-- [ ] 模拟目标页加载超过 capture 上限和目标 tab 在采集中导航到其他 URL，分别确认返回 `TARGET_LOAD_TIMEOUT` 与 `TARGET_NAVIGATED_AWAY`，且不会交付旧页面或混合页面 profile。
-- [ ] 模拟或选择受限制目标页触发 `chrome.scripting.executeScript` 失败，确认返回 `TARGET_INJECTION_FAILED`，错误摘要已脱敏，插件自己创建的目标 tab 被清理。
-- [ ] 分别用 `captureScreenshotMetadata = true` 和 `false` 创建 capture，确认 `true` 只输出视口尺寸、关键元素 bounding box 和 above-fold 摘要，`false` 不输出 bounding box / above-fold 细节，二者都不输出截图图像或像素数据。
-- [ ] 检查 bridge 页面没有被普通检测写入 popup 缓存或 badge。
-- [ ] 检查 bridge tab 的 `/bridge`、`/v1/captures/*/status`、`/v1/captures/*/control`、`/v1/captures/*/profile` 请求不会写入 `tab-store` header records、popup cache、badge 或 dynamic snapshot。
-- [ ] 检查 bridge tab 发出的普通 runtime message 不会读写普通站点缓存；至少验证伪造 `PAGE_DETECTION_RESULT`、`DYNAMIC_PAGE_SNAPSHOT` 和带其他 tabId 的 popup/header 查询被拒绝或返回 unsupported。
-- [ ] 检查 popup/options 对普通 tab 的读取仍可用，但 popup/options 或 content script 都不能读取 bridge tab 缓存或通过伪造 tabId 读取其他 tab。
-- [ ] 检查 `chrome.storage.session` access level 未被放宽给 content scripts；若测试环境可观察 `setAccessLevel` 调用，必须确认未调用 `TRUSTED_AND_UNTRUSTED_CONTEXTS`，且 content script 不能直接读取 `agent-capture-state` 或 active-tab tracker key。
-- [ ] 检查扩展侧 console/debug 输出不含 bridge URL query、nonce、token、Authorization header、profile body 或目标 URL 敏感 query；E2E 报告只记录脱敏摘要。
-- [ ] 检查 bridge URL 和浏览器历史中不含 API token。
-- [ ] 检查 `agentBridgeEnabled = false` 时，真实 bridge 页面握手失败为 `AGENT_BRIDGE_DISABLED`，目标 tab 没有被打开，profile endpoint 不会产生结果；再显式开启设置后，同一 smoke test 才能进入正常 capture。
-- [ ] 检查 `chrome.storage.sync` 中存在旧 `agentBridgeEnabled: true` 但 `chrome.storage.local` 未启用时，真实 bridge 页面仍失败为 `AGENT_BRIDGE_DISABLED`；只有写入 local opt-in 后才允许 capture。
-- [ ] 检查 `targetMode = "reuse_or_new_tab"` 对同 origin/path 但 query 不同的已打开 tab 不会复用，会新建目标 tab；检查 `active_tab` 对同 origin/path 但 query 不同的 active tab 返回 `ACTIVE_TAB_MISMATCH`。
-- [ ] 检查同一 `/bridge?...nonce=...` 刷新或复制打开时不会第二次渲染 `bridgeToken`；若 capture 还未 claim，也必须返回无 token 状态页或 409，并在报告中记录响应。
-- [ ] 用已生成的真实 `bridgeUrl` 模拟跨站顶层导航：带跨站 `Referer` 或 `Sec-Fetch-Site: cross-site` 请求 `/bridge` 必须返回 `403 ORIGIN_NOT_ALLOWED` 且响应体不包含 `bridgeToken`；无来源头、`Sec-Fetch-Site: none` 或 `same-origin` 的正常打开路径仍按一次性 render/claim 规则执行。
-- [ ] 检查 bridge 页面对恶意 query、错误 message 和 URL 片段不使用 `innerHTML` 反射；HTML 中 JSON script 不会被 `</script>`、`<script>`、`&` 或 U+2028/U+2029 打断。
-- [ ] 检查 `/bridge` 响应头包含 no-store、no-referrer、nosniff、`X-Frame-Options: DENY`、`Cross-Origin-Opener-Policy: same-origin`、`Permissions-Policy`、`frame-ancestors 'none'`；CSP 不包含 `unsafe-inline`，可执行脚本和内联样式只通过本次响应 nonce 放行；尝试 iframe 嵌入 bridge 页面应失败或被浏览器阻止。
-- [ ] 检查 bridge config JSON script 自身带 nonce，且所有 script/style nonce 与 CSP header 中的 `script-src 'nonce-...'`、`style-src 'nonce-...'` 一致。
-- [ ] 检查 capture status/request/control/profile 响应头包含 no-store/nosniff，profile 还包含 no-referrer；检查 `OPTIONS` preflight 不返回 `Access-Control-Allow-*`，跨站网页不能创建 capture；带跨站 `Origin`、跨站 `Referer` 或 `Sec-Fetch-Site: cross-site` 的敏感 endpoint 请求返回 `403 ORIGIN_NOT_ALLOWED`。
-- [ ] 检查 `/health`、`/bridge` 和至少一个 Bearer endpoint 的 Host 校验：正确 `127.0.0.1:{port}` 可用，错误 host、错误端口、`localhost:{port}` 和 `[::1]:{port}` 均按协议拒绝，除非本轮实现显式扩展并同步 manifest/CSP/文档。
-- [ ] 检查非法 request target、encoded slash/backslash、重复 query 字段、未知 `/bridge` query 字段、重复 `Authorization`、重复 `Content-Length`、`Content-Length` + `Transfer-Encoding`、非法 `Transfer-Encoding` 和非 identity `Content-Encoding` 均不会进入业务 routing，且 JS/Python 可观测错误语义一致。
-- [ ] 测试插件安装在非默认浏览器时，未设置 `STACKPRISM_BROWSER_OPEN_COMMAND` 会返回 `EXTENSION_NOT_CONNECTED`，设置后能成功握手。
-- [ ] 测试私有网段目标默认被拒绝，开启 `allowPrivateNetworkTarget` 后才允许。
-- [ ] 单元测试中的私网/DNS 判断必须使用 fixture 假 resolver；真实 DNS/hosts 只作为 E2E smoke 证据记录，不作为离线契约测试的通过条件。
-- [ ] 测试 DNS 解析失败、解析超时和混合公网/私网答案均 fail closed，初始 URL 和 final URL 的错误语义符合 Target policy。
-- [ ] E2E 报告必须明确记录 private-network 防护边界：当前实现可拒绝创建 capture、停止采集和阻止 profile 交付，但不是浏览器级网络防火墙；若测试不能证明导航前零私网触达，不得把该项写成已保证。
-- [ ] E2E 报告必须明确记录本机信任边界：loopback host、nonce 和 bridgeToken 不能证明 bridge server 没有被同机恶意进程伪造；本轮只验证跨站网页、错误 Host、错误 token、重复 token render 和 profile 越权读取被拒绝。
-- [ ] E2E 报告必须明确记录浏览器扩展信任边界：测试默认应使用只安装 StackPrism 的干净浏览器 profile；如果使用真实日常 profile，必须记录已安装其他扩展会让 DOM 内 `bridgeToken` 面临额外暴露面，且本轮不宣称可抵御恶意扩展。
-- [ ] 测试 `targetMode = "active_tab"` 只复用 bridge 页面打开前由 active-tab-tracker 记录的 active tab；缺失时返回 `ACTIVE_TAB_UNAVAILABLE`，不匹配时返回 `ACTIVE_TAB_MISMATCH`，且不会主动切换用户焦点。
-- [ ] 测试 bridge tab 或目标 tab 位于 incognito 时返回 `INCOGNITO_NOT_SUPPORTED`；若测试环境无法启用隐身扩展权限，必须在 E2E 报告中记录跳过原因，并保留单元测试覆盖 tab metadata 判断。
-- [ ] 启动本地静态 HTTP server 服务 `tests/fixtures/site-experience-fixture.html`，用它做一次 smoke test，确认颜色、字体、布局、组件、脱敏和 interaction limitations 输出稳定。
-- [ ] 本地 fixture smoke test 的 capture request 必须显式设置 `"allowPrivateNetworkTarget": true`，且目标端口不能等于当前 bridge server 端口；同时确认当前 bridge origin 仍会被 `BRIDGE_SELF_TARGET_BLOCKED` 拒绝。
-- [ ] 用一个真实复杂站点做第二次 smoke test，确认视觉/UI/UX 字段非空。
-- [ ] 写入 `docs/reviews/CR-AGENT-BRIDGE-E2E-2026-05-22.md`，记录每条验证命令、退出码、通过/失败摘要、浏览器版本、扩展加载目录、bridge ready JSON 脱敏摘要、跳过原因和剩余风险。
-- [ ] E2E 结束后确认 bridge 子进程已退出，端口不再监听；删除 Python 编译产生的 `__pycache__/`，必要时删除临时 fixture server 产物；记录清理命令和结果，避免遗留本地服务或字节码缓存。
-- [ ] 检查发布产物 hygiene：`pnpm run build` 后扫描 `dist/`，确认不存在 `agent-skill/`、本地 bridge server 源脚本、`docs/superpowers/`、`tests/`、`__pycache__/` 或 Python 字节码；同时确认 `dist/manifest.json` 不暴露 `externally_connectable`，且 `web_accessible_resources` 没有 agent-only bridge/Skill 路径。
-- [ ] 运行 `git diff --check`、`git diff --cached --check`、`git status --short`、`git diff --name-only` 和 `git diff --cached --name-only`，确认无 whitespace/conflict-marker 问题，且收口阶段的已跟踪改动、已 stage 改动与未跟踪文件只包含验证报告或必要缺陷修复。
-- [ ] Commit: `test: verify agent bridge capture flow`
+Current status source:
+
+- The original long unchecked E2E list has been replaced by this status matrix because the feature is no longer at pre-implementation planning state.
+- Detailed evidence for the original Task 10 items is grouped in `docs/reviews/CR-AGENT-BRIDGE-COMPLETION-AUDIT-2026-05-24.md#task-10-coverage-matrix`.
+- This plan is not the release sign-off for Chrome Web Store or Edge Add-ons. Store state must be proven from the external store dashboards and disclosure forms.
+
+| Area                                          | Current status                                                   | Evidence and remaining gate                                                                                                                                                                                                                                                                                                                                                     |
+| --------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| E2E report file                               | Complete locally                                                 | `docs/reviews/CR-AGENT-BRIDGE-E2E-2026-05-22.md` exists and records browser, dist path, command, exit code, summary, skip reason and residual risk.                                                                                                                                                                                                                             |
+| Basic command gates                           | Complete locally, rerun before final commit                      | `pnpm run test:unit`, `pnpm run lint`, `pnpm run typecheck`, `pnpm run docs:build`, JS/Python syntax checks and focused bridge tests have passing records in the audit; rerun the main gate set after any further edit.                                                                                                                                                         |
+| Default browser smoke                         | Complete locally                                                 | Default `node tests/agent-bridge-browser-smoke.mjs` now uses the local `tests/fixtures/site-experience-fixture.html` path, with explicit `allowPrivateNetworkTarget = true`, and no longer depends on `https://example.com` resolver behavior.                                                                                                                                  |
+| Public complex-site smoke                     | Partial local evidence                                           | `public-complex-target` captured `https://www.wikipedia.org/` with non-empty visual/layout/component data, but this environment resolved the hostname to `198.18.0.19`, so the smoke explicitly used `allowPrivateNetworkTarget = true`; it is not proof that default no-private-network policy accepts resolver-rewritten public hostnames.                                    |
+| Bridge API and rate limits                    | Complete locally                                                 | JS and Python tests plus live smoke cover auth scope, create/status/profile/control endpoints, query/create rate limits, busy ordering, terminal DELETE and no silent queue.                                                                                                                                                                                                    |
+| Target URL, DNS and private-network policy    | Complete for current fixtures; broader matrix remains external   | Unit fixtures and smoke cover unsupported protocols, credentialed URL rejection, bridge self-target, private target block, DNS lookup failure, final URL block and browser-observed `targetNetworkAddress` IP-literal validation. Multi-network DNS/private-address matrices remain a live environment gate.                                                                    |
+| Profile schema, privacy and UX fields         | Complete locally                                                 | Current profile includes `target.language` and first-order UX fields: `pagePurpose`, `primaryUserPath`, `informationHierarchy`, `ctaStrategy`, `trustSignals`, `navigationDepth`, `contentGrouping`, `frictionPoints` and bounded `textSamples`; profile builder tests cover redaction and no screenshot payload.                                                               |
+| Profile transfer and large profile            | Complete locally                                                 | Tests and smoke cover 384 KiB raw chunking, ack/reassembly, sha256 match, missing chunk, ack timeout, hash mismatch, wrong binding, invalid payload and >8 MB rejection.                                                                                                                                                                                                        |
+| Capture lifecycle and cleanup                 | Complete locally except running idle eviction exact live trigger | Tests and smoke cover cancellation, tab closure, target navigation/load failure/load timeout, extension reload, storage-session clear, deadline reconciliation, target cleanup, bridge process shutdown and no fake profile. Running-capture natural service worker idle eviction has only fail-closed cleanup evidence in the current Chrome behavior and remains a live gate. |
+| Incognito                                     | Unit complete; live metadata branch not proven                   | Content client and tab metadata tests cover `INCOGNITO_NOT_SUPPORTED`. Current CDP and `--incognito` live probes fail closed as `EXTENSION_NOT_CONNECTED` without target fetch or fake profile, so exact live metadata rejection remains a browser configuration gate.                                                                                                          |
+| Bridge page security and local trust boundary | Complete locally with stated boundary                            | Tests cover one-time token render, hostile query/fragment non-reflection, no-store/no-referrer/nosniff/CSP/nonce/frame restrictions, request-target/Host/Origin/Sec-Fetch checks and token redaction. The first version still trusts the local bridge process and does not defend against same-machine malicious processes or other same-profile extensions.                    |
+| Release artifact hygiene                      | Complete locally, rerun after build                              | Release workflow tests and `dist/` scans block `agent-skill/`, `docs/superpowers/`, tests, Python fallback files, local bridge server source and helper `.mjs` files from release artifacts; `dist/manifest.json` must not expose `externally_connectable` or agent-only WAR paths.                                                                                             |
+| Store release and disclosure                  | External gate                                                    | Chrome Web Store and Edge Add-ons update rollout, privacy/data-use disclosure acceptance and release note publication cannot be proven from the worktree.                                                                                                                                                                                                                       |
+| Final git hygiene                             | Pending until branch closeout                                    | Before commit or push, run `git diff --check`, inspect `git status --short`, and confirm changed files are limited to Agent Bridge implementation, tests, docs and audit records.                                                                                                                                                                                               |
+
+Current local verification commands:
+
+```bash
+pnpm run test:unit
+pnpm run lint
+pnpm run typecheck
+pnpm run docs:build
+STACKPRISM_BROWSER_SMOKE_CDP_PORT=9661 node tests/agent-bridge-browser-smoke.mjs
+git diff --check
+```
+
+Optional focused checks before a release candidate:
+
+```bash
+node --check agent-skill/stackprism-site-experience/scripts/stackprism-bridge.mjs
+for f in agent-skill/stackprism-site-experience/scripts/bridge/*.mjs; do node --check "$f"; done
+python3 -m py_compile agent-skill/stackprism-site-experience/scripts/stackprism_bridge.py
+python3 -m compileall -q agent-skill/stackprism-site-experience/scripts/stackprism_bridge_lib
+node --test --test-timeout=60000 tests/stackprism-bridge.test.mjs
+node --test --test-timeout=60000 tests/stackprism_bridge_py.test.mjs
+node --test --test-timeout=60000 tests/release-workflow.test.mjs tests/agent-bridge-manifest.test.mjs
+```
+
+Manual bridge capture example:
+
+```bash
+curl --max-time 60 -sS -X POST "${STACKPRISM_BRIDGE_BASE_URL}/v1/captures" \
+  -H 'content-type: application/json' \
+  -H "authorization: Bearer ${STACKPRISM_BRIDGE_TOKEN}" \
+  -d '{"url":"http://127.0.0.1:<fixture-port>/site-experience-fixture.html","mode":"experience","waitMs":1000,"include":["tech","visual","layout","components","interaction","ux","assets"],"options":{"allowPrivateNetworkTarget":true,"captureScreenshotMetadata":false}}'
+```
+
+Use a real public URL only as an explicit external-target scenario. In the current local environment, `example.com` and some public hostnames can resolve to `198.18.*`; when that happens, the default private-network policy must fail closed unless `allowPrivateNetworkTarget` is explicitly set for an approved local or DNS-proxy test.
+
+External gates retained after local completion:
+
+- Chrome Web Store update rollout.
+- Edge Add-ons update rollout.
+- Store privacy disclosure and release-note acceptance for Agent Bridge data use.
+- Running-capture natural service worker idle eviction exact live trigger.
+- Incognito bridge or target tab exact `INCOGNITO_NOT_SUPPORTED` live metadata path.
+- Broader long-duration resource exhaustion matrix across multiple machines and networks.
+- Broader DNS/private-network matrix outside the current DNS-proxy environment.
 
 ## 安全门禁
 
