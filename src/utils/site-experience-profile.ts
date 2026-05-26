@@ -8,6 +8,8 @@ import {
 import type { PopupRawResult } from '@/types/popup'
 import type { TechnologyRecord } from '@/types/rules'
 import { cleanStringArray } from '@/utils/normalize-settings'
+import { buildAgentGuidance } from '@/utils/site-experience-guidance'
+import { buildLimitations } from '@/utils/site-experience-limitations'
 import {
   cleanInlineText,
   isRecord,
@@ -116,27 +118,32 @@ const buildSourceCoverage = (raw: PopupRawResult | null, experience: any) =>
 const buildEvidence = (
   raw: PopupRawResult | null,
   technologies: TechnologyRecord[],
-  assetProfile: { resourceUrls: string[] },
+  assetProfile: { resourceUrls?: string[] },
   experience: any
-) => ({
-  highConfidence: technologies.filter(item => item.confidence === '高').map(item => item.name),
-  mediumConfidence: technologies.filter(item => item.confidence === '中').map(item => item.name),
-  lowConfidence: technologies.filter(item => item.confidence === '低').map(item => item.name),
-  rawCounts: {
-    technologies: technologies.length,
-    resourceUrls: assetProfile.resourceUrls.length,
-    textSamples: cleanStringArray(experience?.ux?.textSamples).length,
-    componentSamples: Array.isArray(experience?.components?.samples) ? experience.components.samples.length : 0,
-    cssRules: Number(experience?.evidence?.omitted?.cssRules || 0)
-  },
-  sourceCoverage: buildSourceCoverage(raw, experience),
-  truncation: {
-    resourceUrls: Number(experience?.evidence?.omitted?.resourceUrls || 0),
-    textSamples: Number(experience?.evidence?.omitted?.textSamples || 0),
-    componentSamples: Number(experience?.evidence?.omitted?.componentSamples || 0),
-    cssRules: Number(experience?.evidence?.omitted?.cssRules || 0)
+) => {
+  const truncation = experience?.evidence?.truncation || experience?.evidence?.omitted || {}
+  const resourceUrls = assetProfile.resourceUrls || []
+  return {
+    highConfidence: technologies.filter(item => item.confidence === '高').map(item => item.name),
+    mediumConfidence: technologies.filter(item => item.confidence === '中').map(item => item.name),
+    lowConfidence: technologies.filter(item => item.confidence === '低').map(item => item.name),
+    rawCounts: {
+      technologies: technologies.length,
+      resourceUrls: resourceUrls.length,
+      textSamples: cleanStringArray(experience?.ux?.textSamples).length,
+      componentSamples: Array.isArray(experience?.components?.samples) ? experience.components.samples.length : 0,
+      cssRules: Number(truncation.cssRules || 0)
+    },
+    sourceCoverage: buildSourceCoverage(raw, experience),
+    truncation: {
+      resourceUrls: Number(truncation.resourceUrls || 0),
+      textSamples: Number(truncation.textSamples || 0),
+      componentSamples: Number(truncation.componentSamples || 0),
+      cssRules: Number(truncation.cssRules || 0),
+      executeScriptResult: Number(truncation.executeScriptResult || 0)
+    }
   }
-})
+}
 
 const stripScreenshotMetadata = (value: Record<string, unknown>, includeMetadata: boolean): Record<string, unknown> => {
   if (includeMetadata) return value
@@ -164,10 +171,22 @@ const buildLayoutProfile = (experience: any, includeMetadata: boolean): Record<s
   return stripScreenshotMetadata(sanitizeRecord(layout), includeMetadata)
 }
 
-const buildComponentProfile = (experience: any): Record<string, unknown> => {
+const stripComponentRects = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(stripComponentRects)
+  if (!isRecord(value)) return value
+  const out: Record<string, unknown> = {}
+  for (const [key, item] of Object.entries(value)) {
+    if (/^(rect|boundingBox|bounds)$/i.test(key)) continue
+    out[key] = stripComponentRects(item)
+  }
+  return out
+}
+
+const buildComponentProfile = (experience: any, includeMetadata: boolean): Record<string, unknown> => {
   const components = experience?.components || {}
   if (!isRecord(components) || !Object.keys(components).length) return {}
-  return sanitizeRecord(components)
+  const sanitized = sanitizeRecord(components)
+  return includeMetadata ? sanitized : (stripComponentRects(sanitized) as Record<string, unknown>)
 }
 
 const buildInteractionProfile = (experience: any): Record<string, unknown> => {
@@ -185,35 +204,6 @@ const buildUxProfile = (experience: any): Record<string, unknown> => {
   })
 }
 
-const buildLimitations = (request: AgentCaptureRequest, experience: any) => {
-  const limitations = new Set<string>()
-  if (request.viewports.length) limitations.add('viewport_emulation_unsupported')
-  if (request.options.captureScreenshotMetadata === false) limitations.add('screenshot_metadata_not_requested')
-  if (request.include && !request.include.includes('visual')) limitations.add('visual_section_not_requested')
-  if (request.include && !request.include.includes('layout')) limitations.add('layout_section_not_requested')
-  if (request.include && !request.include.includes('components')) limitations.add('components_section_not_requested')
-  if (request.include && !request.include.includes('interaction')) limitations.add('interaction_section_not_requested')
-  if (request.include && !request.include.includes('ux')) limitations.add('ux_section_not_requested')
-  if (request.include && !request.include.includes('assets')) limitations.add('assets_section_not_requested')
-  if (Number(experience?.evidence?.crossOriginIframes || 0) > 0) limitations.add('cross_origin_iframes_limited')
-  if (Number(experience?.interaction?.closedShadowRoots || 0) > 0) limitations.add('closed_shadow_roots_limited')
-  if (Number(experience?.evidence?.inaccessibleStylesheets || 0) > 0) limitations.add('stylesheet_access_limited')
-  if (experience?.interaction?.passive) limitations.add('passive_interaction_only')
-  return [...limitations]
-}
-
-const buildAgentGuidance = (techProfile: ReturnType<typeof buildTechProfile>, limitations: string[]) => {
-  const summaryParts = []
-  if (techProfile.primaryFrontend) summaryParts.push(`优先复刻 ${techProfile.primaryFrontend} 的前端体验。`)
-  summaryParts.push('优先复刻视觉层级、交互反馈、布局密度和信息结构。')
-  if (limitations.length) summaryParts.push(`注意 limitations: ${limitations.slice(0, 3).join('、')}`)
-  return {
-    summary: summaryParts.join(' '),
-    priorities: ['布局密度', '视觉层级', '交互反馈', '信息结构'],
-    cautions: ['高置信证据优先', '低置信候选仅作参考', '隐私字段已脱敏']
-  }
-}
-
 export interface BuildSiteExperienceProfileInput {
   captureId: string
   request: AgentCaptureRequest
@@ -229,10 +219,11 @@ export interface BuildSiteExperienceProfileInput {
 }
 
 export const buildSiteExperienceProfile = (input: BuildSiteExperienceProfileInput): SiteExperienceProfile => {
-  const technologies = (input.raw?.technologies || []).map(sanitizeTechnology)
-  const assetProfile = buildAssetProfile(input.raw, input.experience, input.request.options.maxResourceUrls)
+  const include = new Set(input.request.include)
+  const technologies = include.has('tech') ? (input.raw?.technologies || []).map(sanitizeTechnology) : []
+  const assetProfile = include.has('assets') ? buildAssetProfile(input.raw, input.experience, input.request.options.maxResourceUrls) : {}
   const limitations = buildLimitations(input.request, input.experience)
-  const techProfile = buildTechProfile(technologies)
+  const techProfile = include.has('tech') ? buildTechProfile(technologies) : {}
   const browserContext = {
     userAgent: cleanInlineText(input.userAgent || ''),
     extensionVersion: cleanInlineText(input.extensionVersion || ''),
@@ -279,11 +270,13 @@ export const buildSiteExperienceProfile = (input: BuildSiteExperienceProfileInpu
     },
     browserContext,
     techProfile,
-    visualProfile: buildVisualProfile(input.experience, input.request.options.captureScreenshotMetadata),
-    layoutProfile: buildLayoutProfile(input.experience, input.request.options.captureScreenshotMetadata),
-    componentProfile: buildComponentProfile(input.experience),
-    interactionProfile: buildInteractionProfile(input.experience),
-    uxProfile: buildUxProfile(input.experience),
+    visualProfile: include.has('visual') ? buildVisualProfile(input.experience, input.request.options.captureScreenshotMetadata) : {},
+    layoutProfile: include.has('layout') ? buildLayoutProfile(input.experience, input.request.options.captureScreenshotMetadata) : {},
+    componentProfile: include.has('components')
+      ? buildComponentProfile(input.experience, input.request.options.captureScreenshotMetadata)
+      : {},
+    interactionProfile: include.has('interaction') ? buildInteractionProfile(input.experience) : {},
+    uxProfile: include.has('ux') ? buildUxProfile(input.experience) : {},
     assetProfile,
     evidence: buildEvidence(input.raw, technologies, assetProfile, input.experience),
     limitations,

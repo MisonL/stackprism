@@ -44,6 +44,7 @@ export type ResponsePayloadMap = {
   AGENT_PROFILE_TRANSFER_CHUNK: Ok<null> | Err
   AGENT_PROFILE_TRANSFER_COMPLETE: Ok<null> | Err
   AGENT_PROFILE_TRANSFER_ACK: Ok<{ status?: AgentCaptureStatusPayload; error?: AgentBridgeError }> | Err
+  AGENT_PROFILE_TRANSFER_PORT_HELLO: Ok<null> | Err
 }
 
-export type ResponseFor<T extends MessageType> = ResponsePayloadMap[T]
+export type ResponseFor<T extends MessageType> = T extends keyof ResponsePayloadMap ? ResponsePayloadMap[T] : Err

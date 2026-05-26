@@ -1,5 +1,6 @@
 export const bridgeProtocolVersion = 1 as const
 export const SITE_EXPERIENCE_PROFILE_SCHEMA = 'stackprism.site_experience_profile.v1' as const
+export const AGENT_PROFILE_TRANSFER_PORT = 'stackprism-agent-profile-transfer' as const
 
 export const REQUIRED_AGENT_BRIDGE_CAPABILITIES = [
   'agentBridge',
@@ -152,6 +153,8 @@ export interface AgentCaptureStatusPayload {
   phase?: AgentCapturePhase
   sequence?: number
   finalUrl?: string
+  targetNetworkAddress?: string
+  targetNetworkFromCache?: boolean
   error?: AgentBridgeError
 }
 
@@ -291,6 +294,14 @@ export interface AgentProfileTransferAckMessage {
   error?: AgentBridgeError
 }
 
+export interface AgentProfileTransferPortHelloMessage {
+  type: 'AGENT_PROFILE_TRANSFER_PORT_HELLO'
+  captureId: string
+  sessionId: string
+  nonce: string
+  protocolVersion: typeof bridgeProtocolVersion
+}
+
 export type AgentBridgeRuntimeMessage =
   | AgentBridgeHelloMessage
   | StartAgentCaptureMessage
@@ -300,3 +311,4 @@ export type AgentBridgeRuntimeMessage =
   | AgentProfileTransferChunkMessage
   | AgentProfileTransferCompleteMessage
   | AgentProfileTransferAckMessage
+  | AgentProfileTransferPortHelloMessage
