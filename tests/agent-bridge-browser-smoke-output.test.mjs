@@ -86,8 +86,10 @@ test('implementation plan carries a current status overlay instead of looking fu
   const statusOverlay = sectionBetween(implementationPlan, '## 当前实现状态', '## 总目标')
   const task10 = sectionBetween(implementationPlan, '### Task 10: 端到端验证与收口', '## 安全门禁')
 
+  assert.doesNotMatch(implementationPlan, /\n- \[ \]/)
   assert.match(statusOverlay, /可用第一版已落地/)
   assert.match(statusOverlay, /不能按原计划标记为全量完成/)
+  assert.match(statusOverlay, /Historical item:/)
   assert.match(statusOverlay, /Task 10 状态矩阵/)
   assert.match(statusOverlay, /外部或未触发 gate/)
   assert.match(statusOverlay, /Chrome Web Store \/ Edge Add-ons/)
@@ -331,8 +333,8 @@ test('completion audit records handoff baseline as clean', () => {
   assert.doesNotMatch(currentStatus, /52 个 staged 文件/)
   assert.doesNotMatch(currentStatus, /39 个 unstaged 文件/)
   assert.doesNotMatch(currentStatus, /4 个 untracked Agent Bridge 文件/)
-  assert.match(currentStatus, /交接基线状态：工作区干净/)
-  assert.match(currentStatus, /本分支已推送到 `origin\/codex\/agent-bridge-implementation`/)
+  assert.match(currentStatus, /历史交接基线状态：工作区干净/)
+  assert.match(currentStatus, /此行只记录接手前基线，不表示当前 HEAD 或远端同步状态/)
 })
 
 const assertNoReportTokenPrefix = source => {

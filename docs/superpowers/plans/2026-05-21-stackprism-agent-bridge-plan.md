@@ -1,6 +1,6 @@
 # StackPrism Agent Bridge Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans for new implementation work. This document now contains archived historical tasks plus the current status matrix; open work is tracked by explicit current-status rows, not unchecked historical checklist syntax.
 
 **Goal:** 构建一个不依赖 MCP、不需要用户手动复制/下载的 StackPrism Agent Bridge：用户安装浏览器插件后，AI Agent 通过 Skill 内 JS/PY 脚本启动本地 HTTP bridge，自动驱动插件采集目标网站的技术、视觉、UI/UX、交互与资源信息，并读取 `stackprism.site_experience_profile.v1`。
 
@@ -16,7 +16,7 @@
 - 不能按原计划标记为全量完成：原计划仍有外部发布和 live browser gate，不能仅凭本机单元测试或 fixture smoke 关闭全部 gate。
 - 本机已收敛：本轮补齐 profile 语言字段、UX 一阶分类白名单、默认 browser smoke fixture-backed 成功路径、Task 10 状态矩阵，以及开发文档和审计文档的 gate 口径。
 - 外部或未触发 gate：Chrome Web Store / Edge Add-ons 更新链路和商店披露、运行中 idle-driven service worker eviction、精确 incognito `INCOGNITO_NOT_SUPPORTED` live 浏览器元数据路径、更广 DNS/private-network 和长时资源压力矩阵仍需保留为未完成边界。
-- 下方 Task 1 到 Task 9 保留为历史实施计划，不再作为当前完成状态来源；当前状态以本节、Task 10 状态矩阵和 `docs/reviews/CR-AGENT-BRIDGE-*.md` 为准。
+- 下方 Task 1 到 Task 9 保留为历史实施计划，已从 checkbox 改为 `Historical item:`，不再作为当前完成状态来源；当前状态以本节、Task 10 状态矩阵和 `docs/reviews/CR-AGENT-BRIDGE-*.md` 为准。
 
 ## 总目标
 
@@ -813,23 +813,23 @@ Frame and shadow DOM rule:
 - Create: `tests/fixtures/bridge-protocol-identifiers.json`
 - Create: `tests/site-experience-profile.test.mjs`
 
-- [ ] 修改 `package.json` 的 `test:unit` 为 `node --test --test-timeout=60000 tests/*.test.mjs` 或等效超时命令，满足后端/脚本测试 60 秒超时基线，防止 bridge 子进程测试卡死。
-- [ ] 定义 `AgentCaptureRequest`、`AgentCaptureStatus`、`SiteExperienceProfile`、`AgentBridgeError`。
-- [ ] 定义 `AgentBridgeCapabilities`，字段固定为 `agentBridge`、`siteExperienceProfileV1`、`profileChunkTransport`、`bridgeContentPost`、`storageSession`、`experienceProfiler`、`rawProfile`、`viewportMetadata`。
-- [ ] 定义 agent bridge message union：`AgentBridgeHelloMessage`、`StartAgentCaptureMessage`、`AgentCaptureStatusMessage`、`AgentCaptureControlMessage`、`AgentProfileTransferBeginMessage`、`AgentProfileTransferChunkMessage`、`AgentProfileTransferCompleteMessage`、`AgentProfileTransferAckMessage`。
-- [ ] 在 `DetectorSettings` 中增加 `agentBridgeEnabled` 运行时字段，`DEFAULT_SETTINGS` 和 `normalizeSettings` 的缺省值必须为 `false`；测试覆盖旧 sync 设置对象、非法类型和显式 `true` 三种输入，并确认 sync payload 中如果误带 `agentBridgeEnabled: true` 也不会自动开启，因为真实生效来源是 local opt-in。
-- [ ] 写测试确认 `StartAgentCaptureMessage` 不允许 `bridgeToken` 字段，profile transfer messages 不允许 profile wrapper 字段。
-- [ ] `tests/helpers/load-ts-module.mjs` 提供 `loadTsModule(path)`，用 `typescript.transpileModule` 编译 TS，并把 `@/foo` alias 改写为测试可 import 的 `src/foo` 相对路径；对有运行时 import 的模块编译到系统临时目录或仓库已忽略的 `tmp/compiled-tests/` 再用 file URL import，避免 data URL 相对 import 失败且不产生未跟踪测试产物。
-- [ ] 定义 `bridgeProtocolVersion = 1`，并写入 request/status/profile 类型。
-- [ ] 定义协议标识符常量和 validator：`apiToken`、`bridgeToken`、`captureId`、`sessionId`、`nonce`、`profileTransferId`、`cspNonce` 的 regex、长度、前缀必须与 Protocol identifier contract 一致，并导出给 bridge 脚本、插件 handshake 和测试复用。
-- [ ] 新增 `tests/fixtures/bridge-protocol-identifiers.json`，覆盖每类标识符至少 2 个合法样例和非法样例：错误前缀、长度不足/过长、`+`、`/`、`=`、空白、Unicode、percent-encoded slash、点段、大小写错误、query 分隔符、空值。测试必须证明文档中的脱敏占位 `spb_xxx`、`spbt_xxx`、`cap_20260521_abcdef`、`s_xxx`、`n_xxx` 不会被 validator 接受。
-- [ ] 写测试确认 schema 常量为 `stackprism.site_experience_profile.v1`。
-- [ ] 写测试确认 `AgentBridgeCapabilities` 包含所有第一版必需 capability，且 `SiteExperienceProfile.browserContext.extensionCapabilities` 使用同一类型。
-- [ ] 写测试确认 request 类型包含 `allowPrivateNetworkTarget`，默认值由 bridge 脚本处理；Task 1 不测试 DNS/private-network 行为，避免在 bridge 实现前写不可运行的测试。
-- [ ] 写测试确认 error code 枚举至少包含：`NOT_FOUND`、`METHOD_NOT_ALLOWED`、`UNAUTHORIZED`、`FORBIDDEN`、`ORIGIN_NOT_ALLOWED`、`UNSUPPORTED_MEDIA_TYPE`、`UNSUPPORTED_TRANSFER_ENCODING`、`INVALID_JSON`、`INVALID_REQUEST`、`REQUEST_TOO_LARGE`、`REQUEST_TIMEOUT`、`SERVER_BUSY`、`STALE_STATUS_UPDATE`、`PORT_IN_USE`、`BRIDGE_INVALID_ENV`、`BRIDGE_START_TIMEOUT`、`BRIDGE_READY_PARSE_FAILED`、`BRIDGE_PROTOCOL_UNSUPPORTED`、`BRIDGE_REQUEST_MISMATCH`、`AGENT_BRIDGE_DISABLED`、`CAPTURE_BUSY`、`CAPTURE_TIMEOUT`、`EXTENSION_NOT_CONNECTED`、`BROWSER_OPEN_FAILED`、`BRIDGE_TOKEN_CANNOT_READ_PROFILE`、`PRIVATE_NETWORK_TARGET_BLOCKED`、`TARGET_DNS_LOOKUP_FAILED`、`BRIDGE_SELF_TARGET_BLOCKED`、`FINAL_URL_BLOCKED`、`ACTIVE_TAB_UNAVAILABLE`、`ACTIVE_TAB_MISMATCH`、`INCOGNITO_NOT_SUPPORTED`、`TARGET_LOAD_TIMEOUT`、`TARGET_LOAD_FAILED`、`TARGET_INJECTION_FAILED`、`TARGET_TAB_CLOSED`、`BRIDGE_TAB_CLOSED`、`TARGET_NAVIGATED_AWAY`、`SERVICE_WORKER_RESTARTED`、`BRIDGE_TRANSPORT_DISCONNECTED`、`PROFILE_TRANSPORT_FAILED`、`PROFILE_CHUNK_MISSING`、`PROFILE_HASH_MISMATCH`、`PROFILE_TOO_LARGE`、`RATE_LIMITED`、`NONCE_REUSED`、`CAPTURE_ALREADY_COMPLETED`、`CAPTURE_RESULT_EXPIRED`、`NOT_SUPPORTED`。重复 header、歧义 `Content-Length`/`Transfer-Encoding`、非法 request target 和非法 path/query 都复用 `INVALID_REQUEST`，不得新增一套不一致错误码。
-- [ ] 验证：`pnpm run test:unit` 通过。
-- [ ] 验证：`pnpm run typecheck` 通过，确认新增协议类型、测试 helper 和 schema 常量可编译并可打包。
-- [ ] Commit: `feat: define agent bridge profile contract`
+- Historical item: 修改 `package.json` 的 `test:unit` 为 `node --test --test-timeout=60000 tests/*.test.mjs` 或等效超时命令，满足后端/脚本测试 60 秒超时基线，防止 bridge 子进程测试卡死。
+- Historical item: 定义 `AgentCaptureRequest`、`AgentCaptureStatus`、`SiteExperienceProfile`、`AgentBridgeError`。
+- Historical item: 定义 `AgentBridgeCapabilities`，字段固定为 `agentBridge`、`siteExperienceProfileV1`、`profileChunkTransport`、`bridgeContentPost`、`storageSession`、`experienceProfiler`、`rawProfile`、`viewportMetadata`。
+- Historical item: 定义 agent bridge message union：`AgentBridgeHelloMessage`、`StartAgentCaptureMessage`、`AgentCaptureStatusMessage`、`AgentCaptureControlMessage`、`AgentProfileTransferBeginMessage`、`AgentProfileTransferChunkMessage`、`AgentProfileTransferCompleteMessage`、`AgentProfileTransferAckMessage`。
+- Historical item: 在 `DetectorSettings` 中增加 `agentBridgeEnabled` 运行时字段，`DEFAULT_SETTINGS` 和 `normalizeSettings` 的缺省值必须为 `false`；测试覆盖旧 sync 设置对象、非法类型和显式 `true` 三种输入，并确认 sync payload 中如果误带 `agentBridgeEnabled: true` 也不会自动开启，因为真实生效来源是 local opt-in。
+- Historical item: 写测试确认 `StartAgentCaptureMessage` 不允许 `bridgeToken` 字段，profile transfer messages 不允许 profile wrapper 字段。
+- Historical item: `tests/helpers/load-ts-module.mjs` 提供 `loadTsModule(path)`，用 `typescript.transpileModule` 编译 TS，并把 `@/foo` alias 改写为测试可 import 的 `src/foo` 相对路径；对有运行时 import 的模块编译到系统临时目录或仓库已忽略的 `tmp/compiled-tests/` 再用 file URL import，避免 data URL 相对 import 失败且不产生未跟踪测试产物。
+- Historical item: 定义 `bridgeProtocolVersion = 1`，并写入 request/status/profile 类型。
+- Historical item: 定义协议标识符常量和 validator：`apiToken`、`bridgeToken`、`captureId`、`sessionId`、`nonce`、`profileTransferId`、`cspNonce` 的 regex、长度、前缀必须与 Protocol identifier contract 一致，并导出给 bridge 脚本、插件 handshake 和测试复用。
+- Historical item: 新增 `tests/fixtures/bridge-protocol-identifiers.json`，覆盖每类标识符至少 2 个合法样例和非法样例：错误前缀、长度不足/过长、`+`、`/`、`=`、空白、Unicode、percent-encoded slash、点段、大小写错误、query 分隔符、空值。测试必须证明文档中的脱敏占位 `spb_xxx`、`spbt_xxx`、`cap_20260521_abcdef`、`s_xxx`、`n_xxx` 不会被 validator 接受。
+- Historical item: 写测试确认 schema 常量为 `stackprism.site_experience_profile.v1`。
+- Historical item: 写测试确认 `AgentBridgeCapabilities` 包含所有第一版必需 capability，且 `SiteExperienceProfile.browserContext.extensionCapabilities` 使用同一类型。
+- Historical item: 写测试确认 request 类型包含 `allowPrivateNetworkTarget`，默认值由 bridge 脚本处理；Task 1 不测试 DNS/private-network 行为，避免在 bridge 实现前写不可运行的测试。
+- Historical item: 写测试确认 error code 枚举至少包含：`NOT_FOUND`、`METHOD_NOT_ALLOWED`、`UNAUTHORIZED`、`FORBIDDEN`、`ORIGIN_NOT_ALLOWED`、`UNSUPPORTED_MEDIA_TYPE`、`UNSUPPORTED_TRANSFER_ENCODING`、`INVALID_JSON`、`INVALID_REQUEST`、`REQUEST_TOO_LARGE`、`REQUEST_TIMEOUT`、`SERVER_BUSY`、`STALE_STATUS_UPDATE`、`PORT_IN_USE`、`BRIDGE_INVALID_ENV`、`BRIDGE_START_TIMEOUT`、`BRIDGE_READY_PARSE_FAILED`、`BRIDGE_PROTOCOL_UNSUPPORTED`、`BRIDGE_REQUEST_MISMATCH`、`AGENT_BRIDGE_DISABLED`、`CAPTURE_BUSY`、`CAPTURE_TIMEOUT`、`EXTENSION_NOT_CONNECTED`、`BROWSER_OPEN_FAILED`、`BRIDGE_TOKEN_CANNOT_READ_PROFILE`、`PRIVATE_NETWORK_TARGET_BLOCKED`、`TARGET_DNS_LOOKUP_FAILED`、`BRIDGE_SELF_TARGET_BLOCKED`、`FINAL_URL_BLOCKED`、`ACTIVE_TAB_UNAVAILABLE`、`ACTIVE_TAB_MISMATCH`、`INCOGNITO_NOT_SUPPORTED`、`TARGET_LOAD_TIMEOUT`、`TARGET_LOAD_FAILED`、`TARGET_INJECTION_FAILED`、`TARGET_TAB_CLOSED`、`BRIDGE_TAB_CLOSED`、`TARGET_NAVIGATED_AWAY`、`SERVICE_WORKER_RESTARTED`、`BRIDGE_TRANSPORT_DISCONNECTED`、`PROFILE_TRANSPORT_FAILED`、`PROFILE_CHUNK_MISSING`、`PROFILE_HASH_MISMATCH`、`PROFILE_TOO_LARGE`、`RATE_LIMITED`、`NONCE_REUSED`、`CAPTURE_ALREADY_COMPLETED`、`CAPTURE_RESULT_EXPIRED`、`NOT_SUPPORTED`。重复 header、歧义 `Content-Length`/`Transfer-Encoding`、非法 request target 和非法 path/query 都复用 `INVALID_REQUEST`，不得新增一套不一致错误码。
+- Historical item: 验证：`pnpm run test:unit` 通过。
+- Historical item: 验证：`pnpm run typecheck` 通过，确认新增协议类型、测试 helper 和 schema 常量可编译并可打包。
+- Historical item: Commit: `feat: define agent bridge profile contract`
 
 ### Task 2: 实现 profile builder
 
@@ -839,21 +839,21 @@ Frame and shadow DOM rule:
 - Modify: `src/background/headers.ts`
 - Modify: `tests/site-experience-profile.test.mjs`
 
-- [ ] 从现有 popup/raw 数据构造 `techProfile` 和 `assetProfile`。
-- [ ] 增加 `limitations` 与 `agentGuidance` 默认规则。
-- [ ] 对 cookie、authorization、set-cookie、token-like 字段做脱敏。
-- [ ] 扩展 `src/background/headers.ts` 的响应头脱敏：`set-cookie` 保留 cookie name 摘要，`cookie`、`authorization`、`proxy-authorization`、`x-api-key`、token-like header 值统一脱敏；测试覆盖 `headers`、`allHeaders`、profile evidence 不泄露原值。
-- [ ] 对资源 URL 的 hash 和敏感 query 参数做脱敏；profile 不输出完整签名 URL、带 token 的图片/字体/脚本 URL。
-- [ ] 对 UX 文本摘要执行 email、手机号、长数字 ID、金额和疑似姓名脱敏。
-- [ ] 对 viewport 输出增加 `viewportMode`，无法多视口采集时显式写入 limitation。
-- [ ] 对 `captureScreenshotMetadata` 输出增加明确分支：`true` 时只允许输出视口尺寸、关键元素 bounding box 和 above-fold 摘要；`false` 时不输出 bounding box / above-fold 细节，并写测试确认不会误产出截图或像素数据。
-- [ ] 对 passive interaction、cross-origin iframe、closed shadow root 和不可访问 stylesheet 写入 limitations。
-- [ ] 对截断结果写入 `evidence.truncation` 和对应 limitation，至少包含资源 URL、文本摘要、组件样本和 CSS rule 样本的 omitted count。
-- [ ] profile builder 必须从 agent capture context 接收 `AgentBridgeCapabilities`，并原样写入 `browserContext.extensionCapabilities`；不得在 builder 内重新推断 capability。
-- [ ] 验证空检测、低置信检测、完整 raw 检测三种输入。
-- [ ] 验证：`pnpm run test:unit` 通过。
-- [ ] 验证：`pnpm run typecheck` 通过，确认 profile builder 的 TypeScript 类型和扩展打包链路没有被破坏。
-- [ ] Commit: `feat: build site experience profile payload`
+- Historical item: 从现有 popup/raw 数据构造 `techProfile` 和 `assetProfile`。
+- Historical item: 增加 `limitations` 与 `agentGuidance` 默认规则。
+- Historical item: 对 cookie、authorization、set-cookie、token-like 字段做脱敏。
+- Historical item: 扩展 `src/background/headers.ts` 的响应头脱敏：`set-cookie` 保留 cookie name 摘要，`cookie`、`authorization`、`proxy-authorization`、`x-api-key`、token-like header 值统一脱敏；测试覆盖 `headers`、`allHeaders`、profile evidence 不泄露原值。
+- Historical item: 对资源 URL 的 hash 和敏感 query 参数做脱敏；profile 不输出完整签名 URL、带 token 的图片/字体/脚本 URL。
+- Historical item: 对 UX 文本摘要执行 email、手机号、长数字 ID、金额和疑似姓名脱敏。
+- Historical item: 对 viewport 输出增加 `viewportMode`，无法多视口采集时显式写入 limitation。
+- Historical item: 对 `captureScreenshotMetadata` 输出增加明确分支：`true` 时只允许输出视口尺寸、关键元素 bounding box 和 above-fold 摘要；`false` 时不输出 bounding box / above-fold 细节，并写测试确认不会误产出截图或像素数据。
+- Historical item: 对 passive interaction、cross-origin iframe、closed shadow root 和不可访问 stylesheet 写入 limitations。
+- Historical item: 对截断结果写入 `evidence.truncation` 和对应 limitation，至少包含资源 URL、文本摘要、组件样本和 CSS rule 样本的 omitted count。
+- Historical item: profile builder 必须从 agent capture context 接收 `AgentBridgeCapabilities`，并原样写入 `browserContext.extensionCapabilities`；不得在 builder 内重新推断 capability。
+- Historical item: 验证空检测、低置信检测、完整 raw 检测三种输入。
+- Historical item: 验证：`pnpm run test:unit` 通过。
+- Historical item: 验证：`pnpm run typecheck` 通过，确认 profile builder 的 TypeScript 类型和扩展打包链路没有被破坏。
+- Historical item: Commit: `feat: build site experience profile payload`
 
 ### Task 3: 实现体验采集脚本
 
@@ -867,25 +867,25 @@ Frame and shadow DOM rule:
 - Modify: `vite.injected.config.ts`
 - Modify: `src/manifest.config.ts`
 
-- [ ] 采集 computed style token：颜色、字体、字号、行高、间距、圆角、阴影。
-- [ ] 采集 layout landmarks：header/nav/main/footer/aside/hero/above-fold。
-- [ ] 采集 component inventory：button/input/card/nav/tab/modal/table/list/badge。
-- [ ] 采集 interaction tokens：transition、animation、sticky/fixed、focus/hover 可观察线索。
-- [ ] 标记同源 iframe、跨源 iframe、open shadow root、closed shadow root 的可采集边界。
-- [ ] 输出稳定、限长、脱敏的 JSON，不包含可见文本全文。
-- [ ] `src/injected/experience-profiler.ts` 必须 `export default` 一个 JSON-serializable result 或 Promise；构建后的 `public/injected/experience-profiler.iife.js` 末尾必须追加 `__StackPrismInjected_experience_profiler__;`，确保 `chrome.scripting.executeScript({ files })` 的 `injection[0].result` 非空。
-- [ ] 设置明确采集上限，例如最大 DOM 节点数、最大组件样本数、最大文本样本数、最大 CSS rule 数和最大资源 URL 数；超过上限时只返回截断摘要和 omitted count，不让 profile 超过 bridge 的 8 MB 上限。
-- [ ] 设置 `experience-profiler` 注入脚本返回值上限，例如返回给 `chrome.scripting.executeScript` 的 JSON 字符串不超过 2 MB；超过上限时在注入脚本内部先截断样本、写入 `evidence.truncation.executeScriptResult` 和对应 limitation，不允许等到 background 收到超大 executeScript result 或扩展消息传输时才失败。
-- [ ] 在 `vite.injected.config.ts` 的 `ENTRIES` 加入 `experience-profiler`，并在 `build-scripts/build-injected.mjs` 的 `entries` 数组加入同名项。
-- [ ] `src/manifest.config.ts` 的 `web_accessible_resources` 使用最小暴露面；默认不暴露 `injected/experience-profiler.iife.js`。如果实现确实需要暴露，必须把它拆成独立条目、使用最小 `matches`，并在 `docs/dev/agent-bridge.md` 说明为什么不能只用 `chrome.scripting.executeScript({ files })`。
-- [ ] `tests/agent-bridge-manifest.test.mjs` 验证 bridge content script 只匹配 `http://127.0.0.1/*`，普通 observer 仍是第一个 content script，未新增 `chrome.windows` 或其他无关权限，未配置 `externally_connectable`，且 `experience-profiler.iife.js` 默认不在 `web_accessible_resources` 中；若实现选择暴露，则测试必须验证独立条目和最小 match。
-- [ ] `tests/experience-profile-format.test.mjs` 验证构建后的 profiler IIFE 文本包含 `__StackPrismInjected_experience_profiler__;`，并验证 profiler 默认导出形状可被结构化克隆为 executeScript result。
-- [ ] 新增 `tests/fixtures/site-experience-fixture.html`，用固定 DOM/CSS 覆盖颜色、字体、布局、组件、transition 和敏感文本脱敏样本。
-- [ ] 运行 `pnpm exec prettier --check build-scripts/build-injected.mjs vite.injected.config.ts tests/experience-profile-format.test.mjs tests/agent-bridge-manifest.test.mjs tests/fixtures/site-experience-fixture.html`，因为 `pnpm run lint` 只覆盖 `src`，不会检查 build script、Vite injected config 和测试 fixture。
-- [ ] 验证：`pnpm run build:injected` 产出 `public/injected/experience-profiler.iife.js`。
-- [ ] 验证：`pnpm run test:unit` 通过；该步骤必须在 `pnpm run build:injected` 之后执行，因为 `tests/experience-profile-format.test.mjs` 会读取 ignored 构建产物 `public/injected/experience-profiler.iife.js`。
-- [ ] 验证：`pnpm run typecheck` 通过，确认 injected entry、manifest config 和扩展构建链路一致。
-- [ ] Commit: `feat: collect visual and ux experience signals`
+- Historical item: 采集 computed style token：颜色、字体、字号、行高、间距、圆角、阴影。
+- Historical item: 采集 layout landmarks：header/nav/main/footer/aside/hero/above-fold。
+- Historical item: 采集 component inventory：button/input/card/nav/tab/modal/table/list/badge。
+- Historical item: 采集 interaction tokens：transition、animation、sticky/fixed、focus/hover 可观察线索。
+- Historical item: 标记同源 iframe、跨源 iframe、open shadow root、closed shadow root 的可采集边界。
+- Historical item: 输出稳定、限长、脱敏的 JSON，不包含可见文本全文。
+- Historical item: `src/injected/experience-profiler.ts` 必须 `export default` 一个 JSON-serializable result 或 Promise；构建后的 `public/injected/experience-profiler.iife.js` 末尾必须追加 `__StackPrismInjected_experience_profiler__;`，确保 `chrome.scripting.executeScript({ files })` 的 `injection[0].result` 非空。
+- Historical item: 设置明确采集上限，例如最大 DOM 节点数、最大组件样本数、最大文本样本数、最大 CSS rule 数和最大资源 URL 数；超过上限时只返回截断摘要和 omitted count，不让 profile 超过 bridge 的 8 MB 上限。
+- Historical item: 设置 `experience-profiler` 注入脚本返回值上限，例如返回给 `chrome.scripting.executeScript` 的 JSON 字符串不超过 2 MB；超过上限时在注入脚本内部先截断样本、写入 `evidence.truncation.executeScriptResult` 和对应 limitation，不允许等到 background 收到超大 executeScript result 或扩展消息传输时才失败。
+- Historical item: 在 `vite.injected.config.ts` 的 `ENTRIES` 加入 `experience-profiler`，并在 `build-scripts/build-injected.mjs` 的 `entries` 数组加入同名项。
+- Historical item: `src/manifest.config.ts` 的 `web_accessible_resources` 使用最小暴露面；默认不暴露 `injected/experience-profiler.iife.js`。如果实现确实需要暴露，必须把它拆成独立条目、使用最小 `matches`，并在 `docs/dev/agent-bridge.md` 说明为什么不能只用 `chrome.scripting.executeScript({ files })`。
+- Historical item: `tests/agent-bridge-manifest.test.mjs` 验证 bridge content script 只匹配 `http://127.0.0.1/*`，普通 observer 仍是第一个 content script，未新增 `chrome.windows` 或其他无关权限，未配置 `externally_connectable`，且 `experience-profiler.iife.js` 默认不在 `web_accessible_resources` 中；若实现选择暴露，则测试必须验证独立条目和最小 match。
+- Historical item: `tests/experience-profile-format.test.mjs` 验证构建后的 profiler IIFE 文本包含 `__StackPrismInjected_experience_profiler__;`，并验证 profiler 默认导出形状可被结构化克隆为 executeScript result。
+- Historical item: 新增 `tests/fixtures/site-experience-fixture.html`，用固定 DOM/CSS 覆盖颜色、字体、布局、组件、transition 和敏感文本脱敏样本。
+- Historical item: 运行 `pnpm exec prettier --check build-scripts/build-injected.mjs vite.injected.config.ts tests/experience-profile-format.test.mjs tests/agent-bridge-manifest.test.mjs tests/fixtures/site-experience-fixture.html`，因为 `pnpm run lint` 只覆盖 `src`，不会检查 build script、Vite injected config 和测试 fixture。
+- Historical item: 验证：`pnpm run build:injected` 产出 `public/injected/experience-profiler.iife.js`。
+- Historical item: 验证：`pnpm run test:unit` 通过；该步骤必须在 `pnpm run build:injected` 之后执行，因为 `tests/experience-profile-format.test.mjs` 会读取 ignored 构建产物 `public/injected/experience-profiler.iife.js`。
+- Historical item: 验证：`pnpm run typecheck` 通过，确认 injected entry、manifest config 和扩展构建链路一致。
+- Historical item: Commit: `feat: collect visual and ux experience signals`
 
 ### Task 4: 实现 bridge content script 握手
 
@@ -899,37 +899,37 @@ Frame and shadow DOM rule:
 - Modify: `src/types/messages.ts`
 - Modify: `src/background/message-router.ts`
 
-- [ ] content script 只在 loopback bridge 页面激活。
-- [ ] 在 `src/manifest.config.ts` 中保持普通 `content-observer.ts` 为第一个 content script，或同步修改 `content-injector.ts` 通过文件名查找 observer；验证主动注入不会误注入 `agent-bridge-client.ts`。
-- [ ] 对非 `/bridge` path 或缺少 `stackprism-agent-bridge` meta 的 loopback 页面立即 return，不读取 DOM 详情、不发消息、不发请求。
-- [ ] 解析 `session`、`capture`、`nonce` 和 HTML 内嵌 `bridgeToken`，校验 URL path 为 `/bridge`。
-- [ ] 从 `#stackprism-agent-bridge-config[type="application/json"]` 解析 `bridgeToken`，不得依赖页面 JS 全局变量。
-- [ ] 解析 `capture` 和 `nonce`，从 bridge 拉取 `GET /v1/captures/{id}/request`。
-- [ ] 校验 `GET /v1/captures/{id}/request` 返回的 `captureId`、`sessionId`、`nonce` 和 `protocolVersion` 与当前 bridge 页面 config 完全一致；不一致时同源 POST `failed` 和 `BRIDGE_REQUEST_MISMATCH`，不得向 background 发送 `START_AGENT_CAPTURE`。
-- [ ] 握手后同源 POST `waiting_extension` / `running` / `failed` 状态到 `POST /v1/captures/{id}/status`。
-- [ ] bridge content script 为每个 status POST 维护单调递增 `sequence`，并只发送定义过的 phase；background 发来的 late phase 不得倒退覆盖 bridge server 中较新的 phase。
-- [ ] 运行期间轮询 `GET /v1/captures/{id}/control`；收到 `cancel` 后通知 background 取消。
-- [ ] bridge content script 校验 bridge 页面 config 的 `protocolVersion`；不等于插件 `bridgeProtocolVersion` 时同源 POST `failed` / `BRIDGE_PROTOCOL_UNSUPPORTED`，不得向 background 发送 `START_AGENT_CAPTURE`。
-- [ ] background 必须在 `AGENT_BRIDGE_HELLO` 时绑定 `sender.tab.id`、`sender.tab.windowId`、bridge origin、session、capture 和 nonce；后续 `AGENT_CAPTURE_*` 消息必须同时匹配 sender tab id 与 bridge URL，不能只信任 message body 或只校验 URL。
-- [ ] 向 background 发送 `AGENT_BRIDGE_HELLO`。
-- [ ] background 必须拒绝来自非 loopback `/bridge` URL、缺少 tab/window id、或 message body 中 session/capture/nonce 与 `sender.url` query 不一致的 `AGENT_BRIDGE_HELLO`，返回结构化 `INVALID_REQUEST`；若同一 tab 已登记 bridge session，则还必须拒绝与既有登记不一致的重复 hello。单元测试覆盖伪造 sender URL、伪造 tab id 和重复 hello mismatch。
-- [ ] background 返回插件版本、`protocolVersion`、`AgentBridgeCapabilities` 和握手状态；缺少第一版必需 capability 时返回 `NOT_SUPPORTED`，并让 bridge content script 同源 POST failed status。
-- [ ] background 必须在 `AGENT_BRIDGE_HELLO` 时只从 `chrome.storage.local` 读取 `AGENT_BRIDGE_ENABLED_STORAGE_KEY` / `agentBridgeEnabled`；未开启时返回 `AGENT_BRIDGE_DISABLED`，bridge content script 同源 POST failed status，且 background 不登记 capture、不打开目标 tab、不发送 `START_AGENT_CAPTURE`。单元测试必须证明 `chrome.storage.sync` 里的旧 `agentBridgeEnabled: true` 不会让握手通过。
-- [ ] capability 校验通过后，bridge content script 发送 `START_AGENT_CAPTURE`，payload 只包含 `captureId`、`sessionId`、`nonce`、`bridgeOrigin`、规范化 capture request 和 capabilities；不得把 `bridgeToken` 传给 background。
-- [ ] bridge content script 保持与 background 的 `runtime.Port` 或等效消息通道，用于接收 profile payload 并执行同源 POST。
-- [ ] 如果使用 `runtime.Port`，必须在 `src/background/message-router.ts` 或 agent capture 模块注册 `chrome.runtime.onConnect`，校验 `port.name`、`sender.tab.id`、`sender.tab.windowId`、`sender.url`、session、capture 和 nonce；未知 port name、非 bridge sender、重复 port、跨 capture port 或 sender 与登记 bridge tab 不一致时必须断开并返回结构化失败，不能退回普通 onMessage 路径。
-- [ ] bridge content script 实现 `AGENT_PROFILE_TRANSFER_BEGIN`、`AGENT_PROFILE_TRANSFER_CHUNK`、`AGENT_PROFILE_TRANSFER_COMPLETE` 和 `AGENT_PROFILE_TRANSFER_ACK`：逐片 ack、校验 transfer message 的 `captureId`、`sessionId`、`nonce` 与本页 bridge config 一致，按 `profileTransferId` 重组，校验 `payloadBase64`、`byteLength`、UTF-8/JSON decode 和 `sha256`，再同源 POST 原始 `SiteExperienceProfile` JSON。
-- [ ] bridge content script 同源 POST status/profile 时必须设置 `Content-Type: application/json` 和 `Authorization: Bearer {bridgeToken}`；缺任一 header 都应在单元测试中触发 bridge server 的 `UNSUPPORTED_MEDIA_TYPE` 或 `UNAUTHORIZED`。
-- [ ] 分片传输失败必须同源 POST 结构化失败状态：缺片或超时为 `PROFILE_CHUNK_MISSING`，hash 不匹配为 `PROFILE_HASH_MISMATCH`，其他传输失败为 `PROFILE_TRANSPORT_FAILED`；不能让 Agent 只等到 capture timeout。
-- [ ] profile POST 成功或失败都必须回传给 background；断连时 background 标记 `BRIDGE_TRANSPORT_DISCONNECTED`。
-- [ ] `runtime.Port` 的 `onDisconnect` 发生在 capture 未结束时，bridge content script 必须用同源 `POST /v1/captures/{id}/status` 上报 `BRIDGE_TRANSPORT_DISCONNECTED`；background 重启恢复后也必须通过 `bridgeTabId` 通知 bridge content script 上报 `SERVICE_WORKER_RESTARTED` 或 `BRIDGE_TRANSPORT_DISCONNECTED`。
-- [ ] bridge 页面没有 token 时返回显式错误，不静默成功。
-- [ ] bridge 页面不触发普通 `content-observer` 和 badge 更新。
-- [ ] 验证：`pnpm run build:injected` 通过；Task 3 已新增读取 `public/injected/*.iife.js` 的单元测试，后续全量 `test:unit` 在干净 checkout 中必须先生成 ignored injected 产物。
-- [ ] 验证：`pnpm run test:unit` 通过。
-- [ ] 验证：`pnpm run typecheck` 通过，确认 content script、manifest 和 message union 可编译并可打包。
-- [ ] Task 4 阶段不得要求真实 bridge server 浏览器握手 smoke；JS bridge server 在 Task 6 才实现，真实握手与 DevTools 观察统一放到 Task 10。
-- [ ] Commit: `feat: add local bridge handshake`
+- Historical item: content script 只在 loopback bridge 页面激活。
+- Historical item: 在 `src/manifest.config.ts` 中保持普通 `content-observer.ts` 为第一个 content script，或同步修改 `content-injector.ts` 通过文件名查找 observer；验证主动注入不会误注入 `agent-bridge-client.ts`。
+- Historical item: 对非 `/bridge` path 或缺少 `stackprism-agent-bridge` meta 的 loopback 页面立即 return，不读取 DOM 详情、不发消息、不发请求。
+- Historical item: 解析 `session`、`capture`、`nonce` 和 HTML 内嵌 `bridgeToken`，校验 URL path 为 `/bridge`。
+- Historical item: 从 `#stackprism-agent-bridge-config[type="application/json"]` 解析 `bridgeToken`，不得依赖页面 JS 全局变量。
+- Historical item: 解析 `capture` 和 `nonce`，从 bridge 拉取 `GET /v1/captures/{id}/request`。
+- Historical item: 校验 `GET /v1/captures/{id}/request` 返回的 `captureId`、`sessionId`、`nonce` 和 `protocolVersion` 与当前 bridge 页面 config 完全一致；不一致时同源 POST `failed` 和 `BRIDGE_REQUEST_MISMATCH`，不得向 background 发送 `START_AGENT_CAPTURE`。
+- Historical item: 握手后同源 POST `waiting_extension` / `running` / `failed` 状态到 `POST /v1/captures/{id}/status`。
+- Historical item: bridge content script 为每个 status POST 维护单调递增 `sequence`，并只发送定义过的 phase；background 发来的 late phase 不得倒退覆盖 bridge server 中较新的 phase。
+- Historical item: 运行期间轮询 `GET /v1/captures/{id}/control`；收到 `cancel` 后通知 background 取消。
+- Historical item: bridge content script 校验 bridge 页面 config 的 `protocolVersion`；不等于插件 `bridgeProtocolVersion` 时同源 POST `failed` / `BRIDGE_PROTOCOL_UNSUPPORTED`，不得向 background 发送 `START_AGENT_CAPTURE`。
+- Historical item: background 必须在 `AGENT_BRIDGE_HELLO` 时绑定 `sender.tab.id`、`sender.tab.windowId`、bridge origin、session、capture 和 nonce；后续 `AGENT_CAPTURE_*` 消息必须同时匹配 sender tab id 与 bridge URL，不能只信任 message body 或只校验 URL。
+- Historical item: 向 background 发送 `AGENT_BRIDGE_HELLO`。
+- Historical item: background 必须拒绝来自非 loopback `/bridge` URL、缺少 tab/window id、或 message body 中 session/capture/nonce 与 `sender.url` query 不一致的 `AGENT_BRIDGE_HELLO`，返回结构化 `INVALID_REQUEST`；若同一 tab 已登记 bridge session，则还必须拒绝与既有登记不一致的重复 hello。单元测试覆盖伪造 sender URL、伪造 tab id 和重复 hello mismatch。
+- Historical item: background 返回插件版本、`protocolVersion`、`AgentBridgeCapabilities` 和握手状态；缺少第一版必需 capability 时返回 `NOT_SUPPORTED`，并让 bridge content script 同源 POST failed status。
+- Historical item: background 必须在 `AGENT_BRIDGE_HELLO` 时只从 `chrome.storage.local` 读取 `AGENT_BRIDGE_ENABLED_STORAGE_KEY` / `agentBridgeEnabled`；未开启时返回 `AGENT_BRIDGE_DISABLED`，bridge content script 同源 POST failed status，且 background 不登记 capture、不打开目标 tab、不发送 `START_AGENT_CAPTURE`。单元测试必须证明 `chrome.storage.sync` 里的旧 `agentBridgeEnabled: true` 不会让握手通过。
+- Historical item: capability 校验通过后，bridge content script 发送 `START_AGENT_CAPTURE`，payload 只包含 `captureId`、`sessionId`、`nonce`、`bridgeOrigin`、规范化 capture request 和 capabilities；不得把 `bridgeToken` 传给 background。
+- Historical item: bridge content script 保持与 background 的 `runtime.Port` 或等效消息通道，用于接收 profile payload 并执行同源 POST。
+- Historical item: 如果使用 `runtime.Port`，必须在 `src/background/message-router.ts` 或 agent capture 模块注册 `chrome.runtime.onConnect`，校验 `port.name`、`sender.tab.id`、`sender.tab.windowId`、`sender.url`、session、capture 和 nonce；未知 port name、非 bridge sender、重复 port、跨 capture port 或 sender 与登记 bridge tab 不一致时必须断开并返回结构化失败，不能退回普通 onMessage 路径。
+- Historical item: bridge content script 实现 `AGENT_PROFILE_TRANSFER_BEGIN`、`AGENT_PROFILE_TRANSFER_CHUNK`、`AGENT_PROFILE_TRANSFER_COMPLETE` 和 `AGENT_PROFILE_TRANSFER_ACK`：逐片 ack、校验 transfer message 的 `captureId`、`sessionId`、`nonce` 与本页 bridge config 一致，按 `profileTransferId` 重组，校验 `payloadBase64`、`byteLength`、UTF-8/JSON decode 和 `sha256`，再同源 POST 原始 `SiteExperienceProfile` JSON。
+- Historical item: bridge content script 同源 POST status/profile 时必须设置 `Content-Type: application/json` 和 `Authorization: Bearer {bridgeToken}`；缺任一 header 都应在单元测试中触发 bridge server 的 `UNSUPPORTED_MEDIA_TYPE` 或 `UNAUTHORIZED`。
+- Historical item: 分片传输失败必须同源 POST 结构化失败状态：缺片或超时为 `PROFILE_CHUNK_MISSING`，hash 不匹配为 `PROFILE_HASH_MISMATCH`，其他传输失败为 `PROFILE_TRANSPORT_FAILED`；不能让 Agent 只等到 capture timeout。
+- Historical item: profile POST 成功或失败都必须回传给 background；断连时 background 标记 `BRIDGE_TRANSPORT_DISCONNECTED`。
+- Historical item: `runtime.Port` 的 `onDisconnect` 发生在 capture 未结束时，bridge content script 必须用同源 `POST /v1/captures/{id}/status` 上报 `BRIDGE_TRANSPORT_DISCONNECTED`；background 重启恢复后也必须通过 `bridgeTabId` 通知 bridge content script 上报 `SERVICE_WORKER_RESTARTED` 或 `BRIDGE_TRANSPORT_DISCONNECTED`。
+- Historical item: bridge 页面没有 token 时返回显式错误，不静默成功。
+- Historical item: bridge 页面不触发普通 `content-observer` 和 badge 更新。
+- Historical item: 验证：`pnpm run build:injected` 通过；Task 3 已新增读取 `public/injected/*.iife.js` 的单元测试，后续全量 `test:unit` 在干净 checkout 中必须先生成 ignored injected 产物。
+- Historical item: 验证：`pnpm run test:unit` 通过。
+- Historical item: 验证：`pnpm run typecheck` 通过，确认 content script、manifest 和 message union 可编译并可打包。
+- Historical item: Task 4 阶段不得要求真实 bridge server 浏览器握手 smoke；JS bridge server 在 Task 6 才实现，真实握手与 DevTools 观察统一放到 Task 10。
+- Historical item: Commit: `feat: add local bridge handshake`
 
 ### Task 5: 实现 background capture 编排
 
@@ -948,54 +948,54 @@ Frame and shadow DOM rule:
 - Modify: `src/background/bundle-license.ts`
 - Modify: `src/background/popup-cache.ts`
 
-- [ ] `START_AGENT_CAPTURE` 校验 URL、session/capture/nonce 绑定、include、viewports；background 不接收、不读取、不持久化 `bridgeToken`。
-- [ ] `START_AGENT_CAPTURE` 二次校验 `agentBridgeEnabled`，避免设置页关闭后已有 bridge tab 继续发起采集；关闭后返回 `AGENT_BRIDGE_DISABLED`，并清理 bridge session。
-- [ ] `START_AGENT_CAPTURE` payload 必须来自已登记 bridge tab 的 content script；background 必须拒绝含 `bridgeToken`、callback URL 或 profile wrapper 的 payload，返回 `INVALID_REQUEST`。
-- [ ] `START_AGENT_CAPTURE` 校验 `options.forceRefresh`、`options.captureScreenshotMetadata`、`options.targetMode`、`options.keepTabOpen`、`options.allowPrivateNetworkTarget` 和 `options.maxResourceUrls`；未知字段必须返回 `INVALID_REQUEST`，不能静默忽略。
-- [ ] capture 开始前检查 `chrome.storage.session` 可用；不可用时返回 `NOT_SUPPORTED` 和 `details.missingCapability = "storageSession"`，不得退回普通内存状态。
-- [ ] 不得把 `chrome.storage.session` access level 放宽给 content script；若实现显式设置 access level，必须设置为 `TRUSTED_CONTEXTS`。单元测试必须断言没有调用 `setAccessLevel({ accessLevel: "TRUSTED_AND_UNTRUSTED_CONTEXTS" })`，并断言 content script 只能通过 runtime message/Port 访问 agent capture 状态。
-- [ ] `src/background/active-tab-tracker.ts` 记录每个 window 最近的非 bridge active tab；bridge tab 激活时不能覆盖该记录；记录写入 `chrome.storage.session`，service worker 重启后仍可读取。
-- [ ] `src/background/agent-bridge-tabs.ts` 提供 bridge tab/request registry；bridge tab、bridge 页面请求和 bridge API fetch 不得进入普通 `webRequest` header merge、`webNavigation` throttle reset、tab-store、popup-cache、badge 或 dynamic snapshot 流程。
-- [ ] agent capture 的 deadline 必须使用持久化绝对时间，而不是只依赖 background 内存 timer。`agent-capture-state` 必须记录全局 capture deadline、cancel deadline 和 profile transfer deadline；所有事件入口和 service worker 模块初始化都必须调用同一个 deadline reconciliation helper，把过期 capture 标记为结构化失败或取消并清理自己创建的目标 tab。
-- [ ] `src/background/message-router.ts` 对所有会读写 tab 数据的普通消息增加 sender/tab 校验和 bridge tab guard；bridge tab 发来的普通检测、动态快照、popup/raw/header 查询或后台检测消息必须拒绝或返回 unsupported，不能读写目标站点缓存，也不能用 message body 中的 `tabId` 操作其他 tab。
-- [ ] 普通 runtime message 的 sender 校验必须保留 popup/options 正常能力：`sender.tab` 存在时按 content script 处理并要求 `sender.tab.id === tabId`；`sender.tab` 缺失但 `sender.url` 是本扩展 popup/options 页面时，只允许读取当前用户选择的普通 tab，且必须拒绝 bridge tab、incognito tab 和无权限 tab。单元测试覆盖 popup 正常读取、content script 伪造其他 tabId 被拒绝、bridge tab 查询被拒绝。
-- [ ] background、content script 和 agent capture 模块的 console/debug 日志统一走 redaction helper；禁止打印完整 bridge URL query、nonce、token、Authorization header、profile body 和目标 URL 敏感 query。现有 `console.log(... url ...)` 触碰 bridge URL 或 target final URL 时必须改为 redacted URL。
-- [ ] `targetMode = "active_tab"` 从 active-tab-tracker 读取 bridge tab 同窗口的上一张非 bridge active tab；缺失时返回 `ACTIVE_TAB_UNAVAILABLE`，URL 不匹配时返回 `ACTIVE_TAB_MISMATCH`。
-- [ ] bridge tab 或目标 tab 的 `incognito` 为 true 时返回 `INCOGNITO_NOT_SUPPORTED`，并清理当前 capture；第一版不得跨普通窗口和隐身窗口传递状态。
-- [ ] `reuse_or_new_tab` 和 `active_tab` 的 URL 匹配使用统一 helper：protocol/hostname 小写、默认端口折叠、fragment 丢弃、path 空值归一到 `/`，比较完整 URL（不含 hash，包含 query）。同 path 但 query 不同不得复用已有 tab；`active_tab` 场景必须返回 `ACTIVE_TAB_MISMATCH`。
-- [ ] 监听 `chrome.webNavigation.onErrorOccurred` 的目标 tab main frame；加载失败时上报 `TARGET_LOAD_FAILED`，停止采集并清理自己创建的目标 tab，不得把浏览器错误页当目标站点 profile。
-- [ ] 等待目标 tab `status === "complete"` 后，先通过 bridge content script 写入 `running/target_loaded` 和 `finalUrl`；bridge 接受 final URL 后才运行主动检测和 experience profiler。bridge 返回 `FINAL_URL_BLOCKED` 或 `BRIDGE_SELF_TARGET_BLOCKED` 时必须停止采集并清理自己创建的目标 tab。
-- [ ] final URL 通过后再运行主动检测；agent capture 必须使用 `force: true` 或专用内部函数绕过 `DETECTION_THROTTLE_MS`，并在检测后等待 `waitMs` 收集动态资源；超时返回 `TARGET_LOAD_TIMEOUT`。
-- [ ] 捕获 `chrome.scripting.executeScript` promise rejection 和 `chrome.runtime.lastError`；注入 content observer、page detector 或 experience profiler 任一步失败时返回 `TARGET_INJECTION_FAILED`，`details` 只记录脱敏原因类别，不包含完整 URL、token 或浏览器原始错误全文。
-- [ ] 执行 `maxConcurrentCaptures = 1`，忙时返回 `CAPTURE_BUSY`。
-- [ ] 打开或复用目标 tab；新建目标 tab 必须 `active: false`，记录 `createdByCapture`，触发现有技术检测。
-- [ ] 在 `src/background/tab-store.ts` 中增加明确的 agent capture 清理入口，采集前清理目标 tab 的 tab data 与 popup cache。
-- [ ] 在 `src/background/dynamic-snapshot.ts` 中导出 `clearDynamicSnapshotState(tabId)` 或等效函数，清理 `pendingDynamicSnapshots` 与 `dynamicSnapshotTimers`。
-- [ ] 在 `src/background/bundle-license.ts` 复用现有 `clearBundleLicenseTimer(tabId)`；如当前函数未导出，则导出并由 agent capture cleanup 调用。
-- [ ] 实现 `forceRefresh`：采集前统一调用 tab-store、popup cache、dynamic snapshot、bundle timer、detection throttle 的清理入口，避免复用旧页面缓存污染 profile。
-- [ ] 从 `detection.ts` 拆出 agent capture 专用的检测函数；该函数必须返回检测完成信号和错误，不得使用现有 catch 后静默 return 的 `runActivePageDetection` 作为唯一结果来源。
-- [ ] 注入 `experience-profiler.iife.js` 采集视觉/UI/UX 数据。
-- [ ] 按 `include` 决定是否运行技术检测、experience profiler 和资源采样；未请求 section 返回空对象并在 `limitations` 写入 `section_not_requested`。
-- [ ] 第一版不新增 `chrome.windows` 权限，不调整窗口尺寸；所有多视口请求都写入 `viewportMode = "current_viewport"` 和 limitation。
-- [ ] 合并 popup/raw 数据与体验数据，调用 profile builder。
-- [ ] 从 `popup-cache.ts` 导出 agent capture 需要的 raw/display 构建辅助函数，避免绕过现有去重、过滤和链接补全逻辑。
-- [ ] 将 profile payload 通过 profile chunk transport 发给 bridge content script，由其重组、校验 sha256 后同源 POST 回 bridge callback endpoint；background 直连 localhost 只允许作为后续显式 CORS fallback，不在第一版默认路径。
-- [ ] background 发送 profile 分片时必须把原始 `SiteExperienceProfile` 序列化为 UTF-8 JSON bytes，计算 sha256，再把每片 bytes 编码为 `payloadBase64`；单片 raw payload 不超过 `384 * 1024` bytes，并等待每片 ack；ack 超时、content script 返回失败或 transfer complete 未确认时，必须上报 `PROFILE_TRANSPORT_FAILED`，不得把 capture 标记为 completed。
-- [ ] capture 完成、失败、取消或过期时，关闭插件自己创建且 `keepTabOpen = false` 的目标 tab。
-- [ ] 监听目标 tab 或 bridge tab 关闭/导航；分别返回 `TARGET_TAB_CLOSED`、`BRIDGE_TAB_CLOSED` 或 `TARGET_NAVIGATED_AWAY`，并清理 capture 状态。
-- [ ] capture 状态写入 `chrome.storage.session`，最小字段包含 `captureId`、`sessionId`、`nonce`、`bridgeOrigin`、`bridgeUrl`、`bridgeTabId`、`bridgeWindowId`、`targetTabId`、`targetWindowId`、`targetUrl`、`finalUrl`、`targetMode`、`createdByCapture`、`keepTabOpen`、`phase`、`status`、`startedAt`、`updatedAt`、`error`；不得持久化 `bridgeToken` 或 `apiToken`。
-- [ ] `agent-capture-state`、active-tab tracker 和普通 tab cache 使用不同 storage key 前缀；提供集中 helper 列出和清理 agent capture state。capture 终态、bridge tab 关闭、扩展启动恢复失败和 E2E 清理阶段都必须删除对应 capture state，避免后续 capture 误读旧 tab ownership。
-- [ ] service worker 重启后读取 `agent-capture-state`：未完成 capture 标记为 `SERVICE_WORKER_RESTARTED`，通过 `bridgeTabId` 通知 bridge content script 同源 POST 失败状态，并按 `createdByCapture`/`keepTabOpen` 清理目标 tab。
-- [ ] 浏览器完全退出、扩展 reload/update、用户禁用扩展或 `chrome.storage.session` 被清空后，不尝试恢复未完成 capture；恢复入口必须 fail closed，清理残留 state 和自己创建的 target tab，让 Agent 侧通过 bridge timeout/expired 或状态查询看到结构化失败。
-- [ ] 错误路径必须回传结构化错误，不能吞异常。
-- [ ] `tests/agent-capture-orchestration.test.mjs` 使用 fake chrome APIs 覆盖 target URL 不支持、检测超时、注入失败、目标 tab 导航走偏、bridge 不可达、active_tab 缺失/不匹配、incognito 拒绝、service worker restart cleanup、browser/extension reload fail-closed cleanup、deadline reconciliation、`keepTabOpen = false` 只关闭插件创建的目标 tab、`chrome.storage.session` 中不持久化 `bridgeToken`/`apiToken`，以及 `chrome.storage.session` access level 不暴露给 untrusted content scripts。
-- [ ] `tests/agent-capture-orchestration.test.mjs` 必须覆盖 bridge tab/request/message 隔离：`tabs.onUpdated`、`webNavigation.onCommitted`、`webRequest.onHeadersReceived` 和 `runtime.onMessage` 收到 bridge tab 或 `/v1/captures/*` 请求时，不写入 tab-store、popup-cache、badge、dynamic snapshot 或 header records；bridge tab 伪造 `PAGE_DETECTION_RESULT`、`DYNAMIC_PAGE_SNAPSHOT` 或带其他 tabId 的 popup/header 查询必须被拒绝；popup/options 正常读取普通 tab 仍通过。
-- [ ] `tests/agent-capture-orchestration.test.mjs` 必须覆盖扩展侧日志脱敏：bridge URL query、nonce、token、Authorization header、profile body 和目标 URL 敏感 query 不出现在 console/debug 输出中。
-- [ ] 如果实现使用 `runtime.Port`，测试必须覆盖未知 port name、非 bridge sender、重复 port、跨 capture port、错误 `sender.url` 和错误 tab id 都会断开且不会启动 capture 或写入 profile。
-- [ ] 验证：`pnpm run build:injected` 通过；Task 3 已新增读取 `public/injected/*.iife.js` 的单元测试，后续全量 `test:unit` 在干净 checkout 中必须先生成 ignored injected 产物。
-- [ ] 验证：`pnpm run test:unit` 通过。
-- [ ] 验证：`pnpm run typecheck` 通过。
-- [ ] Commit: `feat: orchestrate agent site capture`
+- Historical item: `START_AGENT_CAPTURE` 校验 URL、session/capture/nonce 绑定、include、viewports；background 不接收、不读取、不持久化 `bridgeToken`。
+- Historical item: `START_AGENT_CAPTURE` 二次校验 `agentBridgeEnabled`，避免设置页关闭后已有 bridge tab 继续发起采集；关闭后返回 `AGENT_BRIDGE_DISABLED`，并清理 bridge session。
+- Historical item: `START_AGENT_CAPTURE` payload 必须来自已登记 bridge tab 的 content script；background 必须拒绝含 `bridgeToken`、callback URL 或 profile wrapper 的 payload，返回 `INVALID_REQUEST`。
+- Historical item: `START_AGENT_CAPTURE` 校验 `options.forceRefresh`、`options.captureScreenshotMetadata`、`options.targetMode`、`options.keepTabOpen`、`options.allowPrivateNetworkTarget` 和 `options.maxResourceUrls`；未知字段必须返回 `INVALID_REQUEST`，不能静默忽略。
+- Historical item: capture 开始前检查 `chrome.storage.session` 可用；不可用时返回 `NOT_SUPPORTED` 和 `details.missingCapability = "storageSession"`，不得退回普通内存状态。
+- Historical item: 不得把 `chrome.storage.session` access level 放宽给 content script；若实现显式设置 access level，必须设置为 `TRUSTED_CONTEXTS`。单元测试必须断言没有调用 `setAccessLevel({ accessLevel: "TRUSTED_AND_UNTRUSTED_CONTEXTS" })`，并断言 content script 只能通过 runtime message/Port 访问 agent capture 状态。
+- Historical item: `src/background/active-tab-tracker.ts` 记录每个 window 最近的非 bridge active tab；bridge tab 激活时不能覆盖该记录；记录写入 `chrome.storage.session`，service worker 重启后仍可读取。
+- Historical item: `src/background/agent-bridge-tabs.ts` 提供 bridge tab/request registry；bridge tab、bridge 页面请求和 bridge API fetch 不得进入普通 `webRequest` header merge、`webNavigation` throttle reset、tab-store、popup-cache、badge 或 dynamic snapshot 流程。
+- Historical item: agent capture 的 deadline 必须使用持久化绝对时间，而不是只依赖 background 内存 timer。`agent-capture-state` 必须记录全局 capture deadline、cancel deadline 和 profile transfer deadline；所有事件入口和 service worker 模块初始化都必须调用同一个 deadline reconciliation helper，把过期 capture 标记为结构化失败或取消并清理自己创建的目标 tab。
+- Historical item: `src/background/message-router.ts` 对所有会读写 tab 数据的普通消息增加 sender/tab 校验和 bridge tab guard；bridge tab 发来的普通检测、动态快照、popup/raw/header 查询或后台检测消息必须拒绝或返回 unsupported，不能读写目标站点缓存，也不能用 message body 中的 `tabId` 操作其他 tab。
+- Historical item: 普通 runtime message 的 sender 校验必须保留 popup/options 正常能力：`sender.tab` 存在时按 content script 处理并要求 `sender.tab.id === tabId`；`sender.tab` 缺失但 `sender.url` 是本扩展 popup/options 页面时，只允许读取当前用户选择的普通 tab，且必须拒绝 bridge tab、incognito tab 和无权限 tab。单元测试覆盖 popup 正常读取、content script 伪造其他 tabId 被拒绝、bridge tab 查询被拒绝。
+- Historical item: background、content script 和 agent capture 模块的 console/debug 日志统一走 redaction helper；禁止打印完整 bridge URL query、nonce、token、Authorization header、profile body 和目标 URL 敏感 query。现有 `console.log(... url ...)` 触碰 bridge URL 或 target final URL 时必须改为 redacted URL。
+- Historical item: `targetMode = "active_tab"` 从 active-tab-tracker 读取 bridge tab 同窗口的上一张非 bridge active tab；缺失时返回 `ACTIVE_TAB_UNAVAILABLE`，URL 不匹配时返回 `ACTIVE_TAB_MISMATCH`。
+- Historical item: bridge tab 或目标 tab 的 `incognito` 为 true 时返回 `INCOGNITO_NOT_SUPPORTED`，并清理当前 capture；第一版不得跨普通窗口和隐身窗口传递状态。
+- Historical item: `reuse_or_new_tab` 和 `active_tab` 的 URL 匹配使用统一 helper：protocol/hostname 小写、默认端口折叠、fragment 丢弃、path 空值归一到 `/`，比较完整 URL（不含 hash，包含 query）。同 path 但 query 不同不得复用已有 tab；`active_tab` 场景必须返回 `ACTIVE_TAB_MISMATCH`。
+- Historical item: 监听 `chrome.webNavigation.onErrorOccurred` 的目标 tab main frame；加载失败时上报 `TARGET_LOAD_FAILED`，停止采集并清理自己创建的目标 tab，不得把浏览器错误页当目标站点 profile。
+- Historical item: 等待目标 tab `status === "complete"` 后，先通过 bridge content script 写入 `running/target_loaded` 和 `finalUrl`；bridge 接受 final URL 后才运行主动检测和 experience profiler。bridge 返回 `FINAL_URL_BLOCKED` 或 `BRIDGE_SELF_TARGET_BLOCKED` 时必须停止采集并清理自己创建的目标 tab。
+- Historical item: final URL 通过后再运行主动检测；agent capture 必须使用 `force: true` 或专用内部函数绕过 `DETECTION_THROTTLE_MS`，并在检测后等待 `waitMs` 收集动态资源；超时返回 `TARGET_LOAD_TIMEOUT`。
+- Historical item: 捕获 `chrome.scripting.executeScript` promise rejection 和 `chrome.runtime.lastError`；注入 content observer、page detector 或 experience profiler 任一步失败时返回 `TARGET_INJECTION_FAILED`，`details` 只记录脱敏原因类别，不包含完整 URL、token 或浏览器原始错误全文。
+- Historical item: 执行 `maxConcurrentCaptures = 1`，忙时返回 `CAPTURE_BUSY`。
+- Historical item: 打开或复用目标 tab；新建目标 tab 必须 `active: false`，记录 `createdByCapture`，触发现有技术检测。
+- Historical item: 在 `src/background/tab-store.ts` 中增加明确的 agent capture 清理入口，采集前清理目标 tab 的 tab data 与 popup cache。
+- Historical item: 在 `src/background/dynamic-snapshot.ts` 中导出 `clearDynamicSnapshotState(tabId)` 或等效函数，清理 `pendingDynamicSnapshots` 与 `dynamicSnapshotTimers`。
+- Historical item: 在 `src/background/bundle-license.ts` 复用现有 `clearBundleLicenseTimer(tabId)`；如当前函数未导出，则导出并由 agent capture cleanup 调用。
+- Historical item: 实现 `forceRefresh`：采集前统一调用 tab-store、popup cache、dynamic snapshot、bundle timer、detection throttle 的清理入口，避免复用旧页面缓存污染 profile。
+- Historical item: 从 `detection.ts` 拆出 agent capture 专用的检测函数；该函数必须返回检测完成信号和错误，不得使用现有 catch 后静默 return 的 `runActivePageDetection` 作为唯一结果来源。
+- Historical item: 注入 `experience-profiler.iife.js` 采集视觉/UI/UX 数据。
+- Historical item: 按 `include` 决定是否运行技术检测、experience profiler 和资源采样；未请求 section 返回空对象并在 `limitations` 写入 `section_not_requested`。
+- Historical item: 第一版不新增 `chrome.windows` 权限，不调整窗口尺寸；所有多视口请求都写入 `viewportMode = "current_viewport"` 和 limitation。
+- Historical item: 合并 popup/raw 数据与体验数据，调用 profile builder。
+- Historical item: 从 `popup-cache.ts` 导出 agent capture 需要的 raw/display 构建辅助函数，避免绕过现有去重、过滤和链接补全逻辑。
+- Historical item: 将 profile payload 通过 profile chunk transport 发给 bridge content script，由其重组、校验 sha256 后同源 POST 回 bridge callback endpoint；background 直连 localhost 只允许作为后续显式 CORS fallback，不在第一版默认路径。
+- Historical item: background 发送 profile 分片时必须把原始 `SiteExperienceProfile` 序列化为 UTF-8 JSON bytes，计算 sha256，再把每片 bytes 编码为 `payloadBase64`；单片 raw payload 不超过 `384 * 1024` bytes，并等待每片 ack；ack 超时、content script 返回失败或 transfer complete 未确认时，必须上报 `PROFILE_TRANSPORT_FAILED`，不得把 capture 标记为 completed。
+- Historical item: capture 完成、失败、取消或过期时，关闭插件自己创建且 `keepTabOpen = false` 的目标 tab。
+- Historical item: 监听目标 tab 或 bridge tab 关闭/导航；分别返回 `TARGET_TAB_CLOSED`、`BRIDGE_TAB_CLOSED` 或 `TARGET_NAVIGATED_AWAY`，并清理 capture 状态。
+- Historical item: capture 状态写入 `chrome.storage.session`，最小字段包含 `captureId`、`sessionId`、`nonce`、`bridgeOrigin`、`bridgeUrl`、`bridgeTabId`、`bridgeWindowId`、`targetTabId`、`targetWindowId`、`targetUrl`、`finalUrl`、`targetMode`、`createdByCapture`、`keepTabOpen`、`phase`、`status`、`startedAt`、`updatedAt`、`error`；不得持久化 `bridgeToken` 或 `apiToken`。
+- Historical item: `agent-capture-state`、active-tab tracker 和普通 tab cache 使用不同 storage key 前缀；提供集中 helper 列出和清理 agent capture state。capture 终态、bridge tab 关闭、扩展启动恢复失败和 E2E 清理阶段都必须删除对应 capture state，避免后续 capture 误读旧 tab ownership。
+- Historical item: service worker 重启后读取 `agent-capture-state`：未完成 capture 标记为 `SERVICE_WORKER_RESTARTED`，通过 `bridgeTabId` 通知 bridge content script 同源 POST 失败状态，并按 `createdByCapture`/`keepTabOpen` 清理目标 tab。
+- Historical item: 浏览器完全退出、扩展 reload/update、用户禁用扩展或 `chrome.storage.session` 被清空后，不尝试恢复未完成 capture；恢复入口必须 fail closed，清理残留 state 和自己创建的 target tab，让 Agent 侧通过 bridge timeout/expired 或状态查询看到结构化失败。
+- Historical item: 错误路径必须回传结构化错误，不能吞异常。
+- Historical item: `tests/agent-capture-orchestration.test.mjs` 使用 fake chrome APIs 覆盖 target URL 不支持、检测超时、注入失败、目标 tab 导航走偏、bridge 不可达、active_tab 缺失/不匹配、incognito 拒绝、service worker restart cleanup、browser/extension reload fail-closed cleanup、deadline reconciliation、`keepTabOpen = false` 只关闭插件创建的目标 tab、`chrome.storage.session` 中不持久化 `bridgeToken`/`apiToken`，以及 `chrome.storage.session` access level 不暴露给 untrusted content scripts。
+- Historical item: `tests/agent-capture-orchestration.test.mjs` 必须覆盖 bridge tab/request/message 隔离：`tabs.onUpdated`、`webNavigation.onCommitted`、`webRequest.onHeadersReceived` 和 `runtime.onMessage` 收到 bridge tab 或 `/v1/captures/*` 请求时，不写入 tab-store、popup-cache、badge、dynamic snapshot 或 header records；bridge tab 伪造 `PAGE_DETECTION_RESULT`、`DYNAMIC_PAGE_SNAPSHOT` 或带其他 tabId 的 popup/header 查询必须被拒绝；popup/options 正常读取普通 tab 仍通过。
+- Historical item: `tests/agent-capture-orchestration.test.mjs` 必须覆盖扩展侧日志脱敏：bridge URL query、nonce、token、Authorization header、profile body 和目标 URL 敏感 query 不出现在 console/debug 输出中。
+- Historical item: 如果实现使用 `runtime.Port`，测试必须覆盖未知 port name、非 bridge sender、重复 port、跨 capture port、错误 `sender.url` 和错误 tab id 都会断开且不会启动 capture 或写入 profile。
+- Historical item: 验证：`pnpm run build:injected` 通过；Task 3 已新增读取 `public/injected/*.iife.js` 的单元测试，后续全量 `test:unit` 在干净 checkout 中必须先生成 ignored injected 产物。
+- Historical item: 验证：`pnpm run test:unit` 通过。
+- Historical item: 验证：`pnpm run typecheck` 通过。
+- Historical item: Commit: `feat: orchestrate agent site capture`
 
 ### Task 6: 实现 JS bridge 脚本
 
@@ -1008,71 +1008,71 @@ Frame and shadow DOM rule:
 - Reuse: `tests/fixtures/bridge-protocol-identifiers.json`
 - Modify: `.gitignore`
 
-- [ ] 使用 Node 标准库 `node:http`，不引入运行时依赖。
-- [ ] `stackprism-bridge.mjs` 只保留 CLI guard、启动参数读取和 server lifecycle；HTTP routing、capture store、URL policy、DNS、body limit、browser open、redaction 和 error response 拆入 `scripts/bridge/*.mjs` helper，至少包含 `http-server.mjs`、`capture-store.mjs`、`url-policy.mjs`、`security.mjs` 和 `open-browser.mjs`，避免单文件超 300 行。
-- [ ] 绑定 `127.0.0.1`，端口默认随机，支持环境变量 `STACKPRISM_BRIDGE_PORT`。
-- [ ] 启动前校验环境变量：`STACKPRISM_BRIDGE_PORT` 未设置时才使用随机端口；设置后必须是 `1..65535` 的十进制整数；browser open 相关环境变量不得包含 NUL 字符。非法端口或 NUL 字符返回 `BRIDGE_INVALID_ENV`，非零退出，stdout 不输出 ready JSON，stderr 不泄露 token 或 bridge URL query；`STACKPRISM_BROWSER_OPEN_ARGS_JSON` 的非法 JSON/非数组/非字符串元素仍由打开浏览器步骤返回 `BROWSER_OPEN_FAILED`。
-- [ ] 指定 `STACKPRISM_BRIDGE_PORT` 且端口被占用时，进程必须非零退出，stderr 输出脱敏 `PORT_IN_USE`，stdout 不输出 ready JSON。
-- [ ] 启动成功后 stdout 只输出一行 JSON line，包含 `event`、`baseUrl`、`healthUrl`、`apiToken`、`protocolVersion`、`version`；其他日志写 stderr。ready JSON 必须在 server 已绑定且 endpoint 可接受请求后输出。
-- [ ] 自动打开 bridge 页面：macOS 使用 `open`，Windows 使用 `rundll32.exe url.dll,FileProtocolHandler` 或等效非 shell API，Linux 使用 `xdg-open`；支持 `STACKPRISM_BROWSER_OPEN_COMMAND` 覆盖目标浏览器。不得默认使用 `cmd /c start`，除非测试证明 `?`、`&`、空格和引号不会被 shell 解释。
-- [ ] 自动打开浏览器时不得把 bridge URL 拼进 shell 字符串；JS 使用 `spawn`/`execFile` 的参数数组，Python 使用 `subprocess` 参数数组或 `webbrowser` 安全 API。`STACKPRISM_BROWSER_OPEN_COMMAND` 第一版只表示可执行文件路径；如需额外参数，使用 JSON 数组环境变量 `STACKPRISM_BROWSER_OPEN_ARGS_JSON`，并把 bridge URL 作为最后一个独立参数。
-- [ ] `STACKPRISM_BROWSER_OPEN_ARGS_JSON` 必须严格解析为字符串数组；非法 JSON、非数组或非字符串元素都返回 `BROWSER_OPEN_FAILED`，并在脱敏 `details.reason` 中标记 `invalid_open_args`。浏览器打开测试必须覆盖包含 `?`、`&`、空格和引号的 bridge URL 始终作为单个 argv 传入假命令，不能被 shell 拆分或解释。
-- [ ] 支持测试环境变量 `STACKPRISM_BRIDGE_NO_OPEN=1` 禁止自动打开浏览器，避免单元测试弹出浏览器或依赖用户桌面环境；该模式下创建 capture 不得返回 `BROWSER_OPEN_FAILED`，而是返回 `queued` 和 `bridgeUrl`。
-- [ ] `.gitignore` 加入 `agent-skill/**/scripts/**` 例外，并加入或确认 `__pycache__/`、`*.py[cod]` 仍被忽略；确认以下命令退出码为 1 且无输出：`git check-ignore -v --no-index agent-skill/stackprism-site-experience/scripts/stackprism-bridge.mjs agent-skill/stackprism-site-experience/scripts/bridge/http-server.mjs agent-skill/stackprism-site-experience/scripts/stackprism_bridge.py agent-skill/stackprism-site-experience/scripts/stackprism_bridge_lib/http_server.py`。该步骤必须在创建 JS/Python bridge 脚本前完成，否则 Task 6/7 的脚本会被根规则 `scripts/` 忽略并漏提交；使用 `--no-index`，避免已跟踪文件让 ignore 规则检查产生假阴性。
-- [ ] 确认 `git check-ignore -v --no-index agent-skill/stackprism-site-experience/scripts/stackprism_bridge_lib/__pycache__/http_server.pyc` 有命中，避免 Python 编译验证留下未跟踪字节码。
-- [ ] 实现统一 JSON 错误响应；所有失败返回 `{ "error": { "code", "message", "details" } }`，且 `details` 不含 token、完整 header、完整 URL query 或 profile 片段。
-- [ ] 实现未知路径、错误方法、缺失 Bearer、token scope 不匹配、非 JSON content type、非 UTF-8 charset、非法 UTF-8 body 和 JSON parse failure 的固定错误响应：`NOT_FOUND`、`METHOD_NOT_ALLOWED`、`UNAUTHORIZED`、`FORBIDDEN`、`UNSUPPORTED_MEDIA_TYPE`、`INVALID_JSON`。
-- [ ] 实现 `OPTIONS` preflight 拒绝：返回 `405 METHOD_NOT_ALLOWED` 或等效结构化错误，带正确 `Allow` 头，但不返回任何 `Access-Control-Allow-*` 头；测试覆盖跨站网页无法通过 preflight 获得授权。
-- [ ] 实现 request target 和 path/query 规范化：只接受 origin-form path；拒绝 absolute-form、authority-form、percent-encoded slash/backslash、空 path segment、`..`、重复 query 字段和未知 query 字段；`captureId`、`sessionId`、`nonce` 只接受 Protocol identifier contract 定义的固定 ASCII regex 和长度。
-- [ ] 拒绝重复或歧义请求头：重复 `Host`、`Authorization`、`Content-Type`、`Content-Length`，非法 `Content-Length`，`Content-Length` 与 `Transfer-Encoding` 同时出现，不以 `chunked` 结尾的 `Transfer-Encoding`，以及非 `identity` 的 `Content-Encoding`。
-- [ ] 对状态、request、control、profile 和错误响应设置 `Cache-Control: no-store` 与 `X-Content-Type-Options: nosniff`；profile endpoint 额外设置 `Referrer-Policy: no-referrer`。
-- [ ] 校验 capture request：`url`、`mode`、`waitMs`、`include`、`viewports`、`options.forceRefresh`、`options.captureScreenshotMetadata`、`options.targetMode`、`options.keepTabOpen`、`options.allowPrivateNetworkTarget`、`options.maxResourceUrls` 和未知字段；超出协议范围时返回 `400 INVALID_REQUEST`，不得创建 capture 或打开浏览器。
-- [ ] 使用安全随机源生成 `apiToken`、`bridgeToken`、`sessionId`、capture `nonce`、`profileTransferId` 和 bridge 页面 CSP nonce；不得使用 `Math.random()`、时间戳或递增计数器生成安全边界值。
-- [ ] token 校验必须走共享 helper：先做格式和长度检查，再使用固定时间比较或等效安全比较；失败路径只返回统一 `UNAUTHORIZED`/`FORBIDDEN`，不得在错误或日志中区分“前缀正确但后缀错误”等可被枚举的信息。
-- [ ] `/bridge` URL 不包含 API token；HTML 内嵌一次性 `bridgeToken`，并设置 no-store、no-referrer、nosniff、`X-Frame-Options: DENY`、`Cross-Origin-Opener-Policy: same-origin`、`Permissions-Policy` 和不含 `unsafe-inline`、包含 `script-src 'nonce-{cspNonce}'`、`style-src 'nonce-{cspNonce}'`、`connect-src 'self'`、`frame-ancestors 'none'` 的 CSP。
-- [ ] bridge config JSON script 也必须带本次响应的 `nonce`，测试覆盖 `<script id="stackprism-agent-bridge-config" type="application/json" nonce="...">` 存在，且所有 script/style nonce 与 CSP header 中的 nonce 一致。
-- [ ] `/bridge` 响应使用 `Content-Type: text/html; charset=utf-8`，并在渲染 token 前执行 Host、request target、query schema 和来源导航校验；跨站 `Referer` 或 `Sec-Fetch-Site: cross-site` 必须返回 `ORIGIN_NOT_ALLOWED` 且不渲染 token。
-- [ ] `/bridge` 渲染前校验 `session`、`capture`、`nonce`，校验失败不输出 `bridgeToken`。
-- [ ] `/bridge` 首次成功渲染 token 时记录 `bridgeTokenRenderedAt`；同一 `/bridge?...nonce=...` 再次打开不得重新渲染 `bridgeToken`，即使 content script 尚未 claim，也只能返回无 token 状态页或 409。
-- [ ] `bridgeToken` 首次成功读取 request 或写入 `waiting_extension` 后标记为 claimed；claimed 后同一 `/bridge?...nonce=...` 再次打开也不得重新渲染 `bridgeToken`。
-- [ ] bridge HTML config 必须使用 script-safe JSON 转义，不反射 query 或错误文本到可执行 HTML；页面状态更新只能用 `textContent` 或等效安全 API，不能用 `innerHTML` 写入服务端返回的 message/details。
-- [ ] `POST /v1/captures` 创建 capture 后立即尝试自动打开该 capture 的 bridge 页面；打开失败时返回 `BROWSER_OPEN_FAILED` 并把 capture 标记为 `failed`。
-- [ ] 实现 `/health`、`/bridge`、`POST /v1/captures`、`GET /v1/captures/{id}`、`GET /v1/captures/{id}/request`、`GET /v1/captures/{id}/control`、`GET /v1/captures/{id}/profile`、`POST /v1/captures/{id}/status`、`POST /v1/captures/{id}/profile`、`DELETE /v1/captures/{id}`。
-- [ ] 除 `/health` 和 `/bridge` 外，所有 endpoint 都校验 Bearer token；Agent endpoint 只接受 `apiToken`，插件 endpoint 只接受对应 capture 的 `bridgeToken`。
-- [ ] `GET /v1/captures/{id}` 同时支持 `apiToken` 和同 capture 的 `bridgeToken`；`GET /v1/captures/{id}/profile` 只支持 `apiToken`，`bridgeToken` 必须返回 `BRIDGE_TOKEN_CANNOT_READ_PROFILE`。
-- [ ] `GET /v1/captures/{id}/request` 只支持同 capture 的 `bridgeToken`，返回 `captureId`、`sessionId`、`nonce`、`protocolVersion` 和规范化 `request`，不得返回 `apiToken`、`bridgeToken`、profile body 或 callback URL；测试覆盖跨 capture token、response shape 和敏感字段缺失。
-- [ ] 校验 Host 头，只接受当前 loopback host:port。
-- [ ] 对非 profile JSON 请求 body 大小设限，例如 5 MB；超限返回 `413 REQUEST_TOO_LARGE`。
-- [ ] 对 `POST /v1/captures/{id}/profile` 使用独立 8 MB 上限；超限返回 `PROFILE_TOO_LARGE`，并要求插件先做 truncation。共享 body reader 必须按 endpoint 传入 limit，避免先被 5 MB 通用限制截断而拿不到 profile 专用错误码。
-- [ ] 实现 HTTP resource policy：限制打开连接数、设置 headers/body/keep-alive timeout、逐块累计 body 字节并在超限时停止读取、按协议处理或拒绝 chunked body、SIGINT/SIGTERM/stdin EOF 时关闭 server 和 timer。
-- [ ] 实现基础 rate limit：capture 创建每分钟最多 10 次，状态/profile 查询每分钟最多 120 次，超限返回 `RATE_LIMITED`。
-- [ ] 将 URL 归一化、bridge origin 自捕获判断、credential/protocol 校验和 private-network 判断拆成可导出的纯 helper；helper 接收 resolver 参数，生产 resolver 使用 `node:dns`，单元测试使用 `tests/fixtures/bridge-url-policy-cases.json` 注入的假 resolver。
-- [ ] 生产 DNS resolver 设置 2 秒超时，并把解析超时、NXDOMAIN、SERVFAIL、空结果和任一私网答案按 Target policy 的 fail-closed 语义映射为结构化错误。
-- [ ] 使用生产 resolver 解析目标 hostname，并把解析到 private/loopback/link-local 地址的目标按 `PRIVATE_NETWORK_TARGET_BLOCKED` 拒绝，除非显式开启 `allowPrivateNetworkTarget`。
-- [ ] 即使 `allowPrivateNetworkTarget = true`，目标 URL 指向当前 bridge server origin 时也返回 `BRIDGE_SELF_TARGET_BLOCKED`。
-- [ ] 对插件上报的 final URL 执行同一套 URL 和 DNS 校验；失败时把 capture 标记为 `FINAL_URL_BLOCKED`。
-- [ ] `POST /v1/captures/{id}/status` 收到 `phase = "target_loaded"` 时必须校验 `finalUrl`；失败时直接返回 `409`，让插件在主动检测和 profiler 前中止。
-- [ ] 实现 status phase 和 sequence 规则：只接受定义过的 phase，只接受递增 sequence，终态不可被 late status 覆盖，倒序或重复 status 返回 `409 STALE_STATUS_UPDATE`。
-- [ ] `tests/stackprism-bridge.test.mjs` 必须读取 `tests/fixtures/bridge-protocol-identifiers.json`，确认 JS bridge 的 token/id 生成器只生成合法值，路由/query/Bearer validator 拒绝所有非法样例，且错误响应不暴露 token 正确前缀、错误位置或相似度。
-- [ ] 新增 `tests/fixtures/bridge-url-policy-cases.json`，覆盖 `127.0.0.1`、`localhost`、`192.168.0.1`、`10.0.0.1`、`172.16.0.1`、`169.254.0.1`、`::1`、`fc00::/7`、`fe80::/10`、公网页面、credential URL、fragment 丢弃、hostname 解析到私网地址、默认端口折叠、host 大小写归一、query 完全相同时可匹配、query 不同时不可复用 tab、以及目标指向 bridge server origin 的场景。
-- [ ] capture 默认 60 秒过期。
-- [ ] capture store/timer 模块必须支持测试注入 clock/timer 或测试专用短时配置；生产默认仍使用 30 秒握手超时、60 秒全局超时、10 秒取消超时和 10 分钟 completed TTL。单元测试不得真实等待 30 秒、60 秒或 10 分钟。
-- [ ] `queued` 或 `waiting_extension` 30 秒无握手时标记 `EXTENSION_NOT_CONNECTED`；completed profile 保留 10 分钟后转为 `expired`、清除 profile body，并让 profile endpoint 返回 `CAPTURE_RESULT_EXPIRED`。
-- [ ] running capture 超过 60 秒时标记 `CAPTURE_TIMEOUT`，control endpoint 返回 `cancel`，late status/profile 不得覆盖该失败终态。
-- [ ] `DELETE /v1/captures/{id}` 只允许 `queued`、`waiting_extension`、`running` 转为 `cancel_requested`，control endpoint 返回 `cancel`，插件确认后进入 `cancelled`；不能在 DELETE 时立刻删除 capture。`cancel_requested` 超过 10 秒无确认时转为 `cancelled` 并拒绝 late status 覆盖；对 `completed`、`failed`、`cancelled`、`expired` 调用 DELETE 必须返回 `409` 和当前终态。
-- [ ] 默认不返回 `Access-Control-Allow-Origin: *`；profile 回传测试覆盖 bridge content script 同源 POST 路径。
-- [ ] 对敏感 endpoint 校验 `Origin`、`Referer` 和 `Sec-Fetch-Site`：无这些浏览器头的 Agent/curl 请求允许继续走 Bearer 校验；同 origin bridge 页面请求允许；跨站 `Origin`、跨站 `Referer` 或 `Sec-Fetch-Site: cross-site` 返回 `403 ORIGIN_NOT_ALLOWED` 且不返回 CORS 允许头。
-- [ ] 测试恶意网页式 preflight 和 no-cors/simple request：`OPTIONS` 不能拿到 CORS 允许头；无 Bearer 或非 JSON content type 的请求被拒绝；带跨站 `Origin`/Fetch Metadata 的请求被 `ORIGIN_NOT_ALLOWED` 拒绝；bridge API 不因浏览器跨站请求创建 capture。
-- [ ] 测试 API 状态流、统一错误响应、所有 JSON endpoint 的 `Content-Type: application/json; charset=utf-8`、`/bridge` 的 `Content-Type: text/html; charset=utf-8`、不支持 method 的 `Allow` 头、request validation、未知字段拒绝、method/auth/content-type/Host/Origin 错误、非法 request target、非法 path/query、重复或歧义 header、非 UTF-8 charset、非法 UTF-8 JSON body、`OPTIONS` preflight 拒绝且无 `Access-Control-Allow-*` 头、token-bearing response 的 no-store/nosniff/referrer-policy、请求超时/超大 body/连接数限制/chunked body 策略、status phase/sequence 拒绝、token 校验、安全随机 helper 不使用 `Math.random()`、bridge CSP 不含 `unsafe-inline` 且含 nonce、JSON config script 带 nonce、bridgeToken 同 capture 状态读取、bridgeToken 不能读 profile、bridgeToken 首次 render 后 `/bridge` 不再泄露 token、bridgeToken claimed 后 `/bridge` 不再泄露 token、bridge HTML script-safe 转义、`target_loaded` final URL 拒绝、status 回写、control 取消、cancel 超时、terminal DELETE 返回 409、running capture 全局超时、profile 回写、profile wrapper/schema/captureId mismatch 拒绝、重复 profile 回写返回 `NONCE_REUSED` 或 `CAPTURE_ALREADY_COMPLETED`、超大 profile body 返回 `PROFILE_TOO_LARGE`、过期清理、浏览器打开失败错误、非法环境变量 `BRIDGE_INVALID_ENV`、指定端口占用 `PORT_IN_USE`、stdout ready JSON 结构、stderr 日志不含 Authorization/token/query/profile body、DNS lookup failure、以及 DNS private target 拒绝；URL policy 测试必须读取 `tests/fixtures/bridge-url-policy-cases.json` 并注入假 resolver。
-- [ ] 浏览器打开失败测试必须覆盖 `STACKPRISM_BROWSER_OPEN_ARGS_JSON` 非法值返回 `BROWSER_OPEN_FAILED`，以及包含 shell 元字符的 bridge URL 仍作为单个 argv 传给假命令。
-- [ ] 所有 JS bridge 子进程测试默认设置 `STACKPRISM_BRIDGE_NO_OPEN=1`，并用 `t.after()`、`try/finally` 或等效逻辑关闭子进程、HTTP server 和 timer；只有专门测试浏览器打开失败时才允许禁用 no-open，并且必须使用不会真实打开浏览器的假命令。
-- [ ] Host 校验测试必须覆盖 `/health`、`/bridge` 和至少一个 Bearer endpoint：`Host: 127.0.0.1:{port}` 允许，缺失 Host、错误端口、`localhost:{port}`、`[::1]:{port}` 和任意外部 host 均拒绝，除非实现显式扩展 localhost/IPv6 并同步 manifest/CSP/文档。
-- [ ] bridge 脚本应支持被测试导入而不自动启动 server；CLI 入口必须用 `import.meta.url` 与 `process.argv[1]` guard。
-- [ ] 运行 `pnpm exec prettier --check agent-skill/stackprism-site-experience/scripts/stackprism-bridge.mjs agent-skill/stackprism-site-experience/scripts/bridge/*.mjs tests/stackprism-bridge.test.mjs tests/fixtures/bridge-url-policy-cases.json tests/fixtures/bridge-protocol-identifiers.json`，确认 JS bridge 脚本、helper 和测试 fixture 未被格式化工具漏掉。
-- [ ] 验证：`node --check agent-skill/stackprism-site-experience/scripts/stackprism-bridge.mjs` 通过。
-- [ ] 验证：`for f in agent-skill/stackprism-site-experience/scripts/bridge/*.mjs; do node --check "$f"; done` 通过，避免 `node --check` 只检查第一个展开文件。
-- [ ] 验证：`node --test --test-timeout=60000 tests/stackprism-bridge.test.mjs` 通过。
-- [ ] Commit: `feat: add node bridge script for agents`
+- Historical item: 使用 Node 标准库 `node:http`，不引入运行时依赖。
+- Historical item: `stackprism-bridge.mjs` 只保留 CLI guard、启动参数读取和 server lifecycle；HTTP routing、capture store、URL policy、DNS、body limit、browser open、redaction 和 error response 拆入 `scripts/bridge/*.mjs` helper，至少包含 `http-server.mjs`、`capture-store.mjs`、`url-policy.mjs`、`security.mjs` 和 `open-browser.mjs`，避免单文件超 300 行。
+- Historical item: 绑定 `127.0.0.1`，端口默认随机，支持环境变量 `STACKPRISM_BRIDGE_PORT`。
+- Historical item: 启动前校验环境变量：`STACKPRISM_BRIDGE_PORT` 未设置时才使用随机端口；设置后必须是 `1..65535` 的十进制整数；browser open 相关环境变量不得包含 NUL 字符。非法端口或 NUL 字符返回 `BRIDGE_INVALID_ENV`，非零退出，stdout 不输出 ready JSON，stderr 不泄露 token 或 bridge URL query；`STACKPRISM_BROWSER_OPEN_ARGS_JSON` 的非法 JSON/非数组/非字符串元素仍由打开浏览器步骤返回 `BROWSER_OPEN_FAILED`。
+- Historical item: 指定 `STACKPRISM_BRIDGE_PORT` 且端口被占用时，进程必须非零退出，stderr 输出脱敏 `PORT_IN_USE`，stdout 不输出 ready JSON。
+- Historical item: 启动成功后 stdout 只输出一行 JSON line，包含 `event`、`baseUrl`、`healthUrl`、`apiToken`、`protocolVersion`、`version`；其他日志写 stderr。ready JSON 必须在 server 已绑定且 endpoint 可接受请求后输出。
+- Historical item: 自动打开 bridge 页面：macOS 使用 `open`，Windows 使用 `rundll32.exe url.dll,FileProtocolHandler` 或等效非 shell API，Linux 使用 `xdg-open`；支持 `STACKPRISM_BROWSER_OPEN_COMMAND` 覆盖目标浏览器。不得默认使用 `cmd /c start`，除非测试证明 `?`、`&`、空格和引号不会被 shell 解释。
+- Historical item: 自动打开浏览器时不得把 bridge URL 拼进 shell 字符串；JS 使用 `spawn`/`execFile` 的参数数组，Python 使用 `subprocess` 参数数组或 `webbrowser` 安全 API。`STACKPRISM_BROWSER_OPEN_COMMAND` 第一版只表示可执行文件路径；如需额外参数，使用 JSON 数组环境变量 `STACKPRISM_BROWSER_OPEN_ARGS_JSON`，并把 bridge URL 作为最后一个独立参数。
+- Historical item: `STACKPRISM_BROWSER_OPEN_ARGS_JSON` 必须严格解析为字符串数组；非法 JSON、非数组或非字符串元素都返回 `BROWSER_OPEN_FAILED`，并在脱敏 `details.reason` 中标记 `invalid_open_args`。浏览器打开测试必须覆盖包含 `?`、`&`、空格和引号的 bridge URL 始终作为单个 argv 传入假命令，不能被 shell 拆分或解释。
+- Historical item: 支持测试环境变量 `STACKPRISM_BRIDGE_NO_OPEN=1` 禁止自动打开浏览器，避免单元测试弹出浏览器或依赖用户桌面环境；该模式下创建 capture 不得返回 `BROWSER_OPEN_FAILED`，而是返回 `queued` 和 `bridgeUrl`。
+- Historical item: `.gitignore` 加入 `agent-skill/**/scripts/**` 例外，并加入或确认 `__pycache__/`、`*.py[cod]` 仍被忽略；确认以下命令退出码为 1 且无输出：`git check-ignore -v --no-index agent-skill/stackprism-site-experience/scripts/stackprism-bridge.mjs agent-skill/stackprism-site-experience/scripts/bridge/http-server.mjs agent-skill/stackprism-site-experience/scripts/stackprism_bridge.py agent-skill/stackprism-site-experience/scripts/stackprism_bridge_lib/http_server.py`。该步骤必须在创建 JS/Python bridge 脚本前完成，否则 Task 6/7 的脚本会被根规则 `scripts/` 忽略并漏提交；使用 `--no-index`，避免已跟踪文件让 ignore 规则检查产生假阴性。
+- Historical item: 确认 `git check-ignore -v --no-index agent-skill/stackprism-site-experience/scripts/stackprism_bridge_lib/__pycache__/http_server.pyc` 有命中，避免 Python 编译验证留下未跟踪字节码。
+- Historical item: 实现统一 JSON 错误响应；所有失败返回 `{ "error": { "code", "message", "details" } }`，且 `details` 不含 token、完整 header、完整 URL query 或 profile 片段。
+- Historical item: 实现未知路径、错误方法、缺失 Bearer、token scope 不匹配、非 JSON content type、非 UTF-8 charset、非法 UTF-8 body 和 JSON parse failure 的固定错误响应：`NOT_FOUND`、`METHOD_NOT_ALLOWED`、`UNAUTHORIZED`、`FORBIDDEN`、`UNSUPPORTED_MEDIA_TYPE`、`INVALID_JSON`。
+- Historical item: 实现 `OPTIONS` preflight 拒绝：返回 `405 METHOD_NOT_ALLOWED` 或等效结构化错误，带正确 `Allow` 头，但不返回任何 `Access-Control-Allow-*` 头；测试覆盖跨站网页无法通过 preflight 获得授权。
+- Historical item: 实现 request target 和 path/query 规范化：只接受 origin-form path；拒绝 absolute-form、authority-form、percent-encoded slash/backslash、空 path segment、`..`、重复 query 字段和未知 query 字段；`captureId`、`sessionId`、`nonce` 只接受 Protocol identifier contract 定义的固定 ASCII regex 和长度。
+- Historical item: 拒绝重复或歧义请求头：重复 `Host`、`Authorization`、`Content-Type`、`Content-Length`，非法 `Content-Length`，`Content-Length` 与 `Transfer-Encoding` 同时出现，不以 `chunked` 结尾的 `Transfer-Encoding`，以及非 `identity` 的 `Content-Encoding`。
+- Historical item: 对状态、request、control、profile 和错误响应设置 `Cache-Control: no-store` 与 `X-Content-Type-Options: nosniff`；profile endpoint 额外设置 `Referrer-Policy: no-referrer`。
+- Historical item: 校验 capture request：`url`、`mode`、`waitMs`、`include`、`viewports`、`options.forceRefresh`、`options.captureScreenshotMetadata`、`options.targetMode`、`options.keepTabOpen`、`options.allowPrivateNetworkTarget`、`options.maxResourceUrls` 和未知字段；超出协议范围时返回 `400 INVALID_REQUEST`，不得创建 capture 或打开浏览器。
+- Historical item: 使用安全随机源生成 `apiToken`、`bridgeToken`、`sessionId`、capture `nonce`、`profileTransferId` 和 bridge 页面 CSP nonce；不得使用 `Math.random()`、时间戳或递增计数器生成安全边界值。
+- Historical item: token 校验必须走共享 helper：先做格式和长度检查，再使用固定时间比较或等效安全比较；失败路径只返回统一 `UNAUTHORIZED`/`FORBIDDEN`，不得在错误或日志中区分“前缀正确但后缀错误”等可被枚举的信息。
+- Historical item: `/bridge` URL 不包含 API token；HTML 内嵌一次性 `bridgeToken`，并设置 no-store、no-referrer、nosniff、`X-Frame-Options: DENY`、`Cross-Origin-Opener-Policy: same-origin`、`Permissions-Policy` 和不含 `unsafe-inline`、包含 `script-src 'nonce-{cspNonce}'`、`style-src 'nonce-{cspNonce}'`、`connect-src 'self'`、`frame-ancestors 'none'` 的 CSP。
+- Historical item: bridge config JSON script 也必须带本次响应的 `nonce`，测试覆盖 `<script id="stackprism-agent-bridge-config" type="application/json" nonce="...">` 存在，且所有 script/style nonce 与 CSP header 中的 nonce 一致。
+- Historical item: `/bridge` 响应使用 `Content-Type: text/html; charset=utf-8`，并在渲染 token 前执行 Host、request target、query schema 和来源导航校验；跨站 `Referer` 或 `Sec-Fetch-Site: cross-site` 必须返回 `ORIGIN_NOT_ALLOWED` 且不渲染 token。
+- Historical item: `/bridge` 渲染前校验 `session`、`capture`、`nonce`，校验失败不输出 `bridgeToken`。
+- Historical item: `/bridge` 首次成功渲染 token 时记录 `bridgeTokenRenderedAt`；同一 `/bridge?...nonce=...` 再次打开不得重新渲染 `bridgeToken`，即使 content script 尚未 claim，也只能返回无 token 状态页或 409。
+- Historical item: `bridgeToken` 首次成功读取 request 或写入 `waiting_extension` 后标记为 claimed；claimed 后同一 `/bridge?...nonce=...` 再次打开也不得重新渲染 `bridgeToken`。
+- Historical item: bridge HTML config 必须使用 script-safe JSON 转义，不反射 query 或错误文本到可执行 HTML；页面状态更新只能用 `textContent` 或等效安全 API，不能用 `innerHTML` 写入服务端返回的 message/details。
+- Historical item: `POST /v1/captures` 创建 capture 后立即尝试自动打开该 capture 的 bridge 页面；打开失败时返回 `BROWSER_OPEN_FAILED` 并把 capture 标记为 `failed`。
+- Historical item: 实现 `/health`、`/bridge`、`POST /v1/captures`、`GET /v1/captures/{id}`、`GET /v1/captures/{id}/request`、`GET /v1/captures/{id}/control`、`GET /v1/captures/{id}/profile`、`POST /v1/captures/{id}/status`、`POST /v1/captures/{id}/profile`、`DELETE /v1/captures/{id}`。
+- Historical item: 除 `/health` 和 `/bridge` 外，所有 endpoint 都校验 Bearer token；Agent endpoint 只接受 `apiToken`，插件 endpoint 只接受对应 capture 的 `bridgeToken`。
+- Historical item: `GET /v1/captures/{id}` 同时支持 `apiToken` 和同 capture 的 `bridgeToken`；`GET /v1/captures/{id}/profile` 只支持 `apiToken`，`bridgeToken` 必须返回 `BRIDGE_TOKEN_CANNOT_READ_PROFILE`。
+- Historical item: `GET /v1/captures/{id}/request` 只支持同 capture 的 `bridgeToken`，返回 `captureId`、`sessionId`、`nonce`、`protocolVersion` 和规范化 `request`，不得返回 `apiToken`、`bridgeToken`、profile body 或 callback URL；测试覆盖跨 capture token、response shape 和敏感字段缺失。
+- Historical item: 校验 Host 头，只接受当前 loopback host:port。
+- Historical item: 对非 profile JSON 请求 body 大小设限，例如 5 MB；超限返回 `413 REQUEST_TOO_LARGE`。
+- Historical item: 对 `POST /v1/captures/{id}/profile` 使用独立 8 MB 上限；超限返回 `PROFILE_TOO_LARGE`，并要求插件先做 truncation。共享 body reader 必须按 endpoint 传入 limit，避免先被 5 MB 通用限制截断而拿不到 profile 专用错误码。
+- Historical item: 实现 HTTP resource policy：限制打开连接数、设置 headers/body/keep-alive timeout、逐块累计 body 字节并在超限时停止读取、按协议处理或拒绝 chunked body、SIGINT/SIGTERM/stdin EOF 时关闭 server 和 timer。
+- Historical item: 实现基础 rate limit：capture 创建每分钟最多 10 次，状态/profile 查询每分钟最多 120 次，超限返回 `RATE_LIMITED`。
+- Historical item: 将 URL 归一化、bridge origin 自捕获判断、credential/protocol 校验和 private-network 判断拆成可导出的纯 helper；helper 接收 resolver 参数，生产 resolver 使用 `node:dns`，单元测试使用 `tests/fixtures/bridge-url-policy-cases.json` 注入的假 resolver。
+- Historical item: 生产 DNS resolver 设置 2 秒超时，并把解析超时、NXDOMAIN、SERVFAIL、空结果和任一私网答案按 Target policy 的 fail-closed 语义映射为结构化错误。
+- Historical item: 使用生产 resolver 解析目标 hostname，并把解析到 private/loopback/link-local 地址的目标按 `PRIVATE_NETWORK_TARGET_BLOCKED` 拒绝，除非显式开启 `allowPrivateNetworkTarget`。
+- Historical item: 即使 `allowPrivateNetworkTarget = true`，目标 URL 指向当前 bridge server origin 时也返回 `BRIDGE_SELF_TARGET_BLOCKED`。
+- Historical item: 对插件上报的 final URL 执行同一套 URL 和 DNS 校验；失败时把 capture 标记为 `FINAL_URL_BLOCKED`。
+- Historical item: `POST /v1/captures/{id}/status` 收到 `phase = "target_loaded"` 时必须校验 `finalUrl`；失败时直接返回 `409`，让插件在主动检测和 profiler 前中止。
+- Historical item: 实现 status phase 和 sequence 规则：只接受定义过的 phase，只接受递增 sequence，终态不可被 late status 覆盖，倒序或重复 status 返回 `409 STALE_STATUS_UPDATE`。
+- Historical item: `tests/stackprism-bridge.test.mjs` 必须读取 `tests/fixtures/bridge-protocol-identifiers.json`，确认 JS bridge 的 token/id 生成器只生成合法值，路由/query/Bearer validator 拒绝所有非法样例，且错误响应不暴露 token 正确前缀、错误位置或相似度。
+- Historical item: 新增 `tests/fixtures/bridge-url-policy-cases.json`，覆盖 `127.0.0.1`、`localhost`、`192.168.0.1`、`10.0.0.1`、`172.16.0.1`、`169.254.0.1`、`::1`、`fc00::/7`、`fe80::/10`、公网页面、credential URL、fragment 丢弃、hostname 解析到私网地址、默认端口折叠、host 大小写归一、query 完全相同时可匹配、query 不同时不可复用 tab、以及目标指向 bridge server origin 的场景。
+- Historical item: capture 默认 60 秒过期。
+- Historical item: capture store/timer 模块必须支持测试注入 clock/timer 或测试专用短时配置；生产默认仍使用 30 秒握手超时、60 秒全局超时、10 秒取消超时和 10 分钟 completed TTL。单元测试不得真实等待 30 秒、60 秒或 10 分钟。
+- Historical item: `queued` 或 `waiting_extension` 30 秒无握手时标记 `EXTENSION_NOT_CONNECTED`；completed profile 保留 10 分钟后转为 `expired`、清除 profile body，并让 profile endpoint 返回 `CAPTURE_RESULT_EXPIRED`。
+- Historical item: running capture 超过 60 秒时标记 `CAPTURE_TIMEOUT`，control endpoint 返回 `cancel`，late status/profile 不得覆盖该失败终态。
+- Historical item: `DELETE /v1/captures/{id}` 只允许 `queued`、`waiting_extension`、`running` 转为 `cancel_requested`，control endpoint 返回 `cancel`，插件确认后进入 `cancelled`；不能在 DELETE 时立刻删除 capture。`cancel_requested` 超过 10 秒无确认时转为 `cancelled` 并拒绝 late status 覆盖；对 `completed`、`failed`、`cancelled`、`expired` 调用 DELETE 必须返回 `409` 和当前终态。
+- Historical item: 默认不返回 `Access-Control-Allow-Origin: *`；profile 回传测试覆盖 bridge content script 同源 POST 路径。
+- Historical item: 对敏感 endpoint 校验 `Origin`、`Referer` 和 `Sec-Fetch-Site`：无这些浏览器头的 Agent/curl 请求允许继续走 Bearer 校验；同 origin bridge 页面请求允许；跨站 `Origin`、跨站 `Referer` 或 `Sec-Fetch-Site: cross-site` 返回 `403 ORIGIN_NOT_ALLOWED` 且不返回 CORS 允许头。
+- Historical item: 测试恶意网页式 preflight 和 no-cors/simple request：`OPTIONS` 不能拿到 CORS 允许头；无 Bearer 或非 JSON content type 的请求被拒绝；带跨站 `Origin`/Fetch Metadata 的请求被 `ORIGIN_NOT_ALLOWED` 拒绝；bridge API 不因浏览器跨站请求创建 capture。
+- Historical item: 测试 API 状态流、统一错误响应、所有 JSON endpoint 的 `Content-Type: application/json; charset=utf-8`、`/bridge` 的 `Content-Type: text/html; charset=utf-8`、不支持 method 的 `Allow` 头、request validation、未知字段拒绝、method/auth/content-type/Host/Origin 错误、非法 request target、非法 path/query、重复或歧义 header、非 UTF-8 charset、非法 UTF-8 JSON body、`OPTIONS` preflight 拒绝且无 `Access-Control-Allow-*` 头、token-bearing response 的 no-store/nosniff/referrer-policy、请求超时/超大 body/连接数限制/chunked body 策略、status phase/sequence 拒绝、token 校验、安全随机 helper 不使用 `Math.random()`、bridge CSP 不含 `unsafe-inline` 且含 nonce、JSON config script 带 nonce、bridgeToken 同 capture 状态读取、bridgeToken 不能读 profile、bridgeToken 首次 render 后 `/bridge` 不再泄露 token、bridgeToken claimed 后 `/bridge` 不再泄露 token、bridge HTML script-safe 转义、`target_loaded` final URL 拒绝、status 回写、control 取消、cancel 超时、terminal DELETE 返回 409、running capture 全局超时、profile 回写、profile wrapper/schema/captureId mismatch 拒绝、重复 profile 回写返回 `NONCE_REUSED` 或 `CAPTURE_ALREADY_COMPLETED`、超大 profile body 返回 `PROFILE_TOO_LARGE`、过期清理、浏览器打开失败错误、非法环境变量 `BRIDGE_INVALID_ENV`、指定端口占用 `PORT_IN_USE`、stdout ready JSON 结构、stderr 日志不含 Authorization/token/query/profile body、DNS lookup failure、以及 DNS private target 拒绝；URL policy 测试必须读取 `tests/fixtures/bridge-url-policy-cases.json` 并注入假 resolver。
+- Historical item: 浏览器打开失败测试必须覆盖 `STACKPRISM_BROWSER_OPEN_ARGS_JSON` 非法值返回 `BROWSER_OPEN_FAILED`，以及包含 shell 元字符的 bridge URL 仍作为单个 argv 传给假命令。
+- Historical item: 所有 JS bridge 子进程测试默认设置 `STACKPRISM_BRIDGE_NO_OPEN=1`，并用 `t.after()`、`try/finally` 或等效逻辑关闭子进程、HTTP server 和 timer；只有专门测试浏览器打开失败时才允许禁用 no-open，并且必须使用不会真实打开浏览器的假命令。
+- Historical item: Host 校验测试必须覆盖 `/health`、`/bridge` 和至少一个 Bearer endpoint：`Host: 127.0.0.1:{port}` 允许，缺失 Host、错误端口、`localhost:{port}`、`[::1]:{port}` 和任意外部 host 均拒绝，除非实现显式扩展 localhost/IPv6 并同步 manifest/CSP/文档。
+- Historical item: bridge 脚本应支持被测试导入而不自动启动 server；CLI 入口必须用 `import.meta.url` 与 `process.argv[1]` guard。
+- Historical item: 运行 `pnpm exec prettier --check agent-skill/stackprism-site-experience/scripts/stackprism-bridge.mjs agent-skill/stackprism-site-experience/scripts/bridge/*.mjs tests/stackprism-bridge.test.mjs tests/fixtures/bridge-url-policy-cases.json tests/fixtures/bridge-protocol-identifiers.json`，确认 JS bridge 脚本、helper 和测试 fixture 未被格式化工具漏掉。
+- Historical item: 验证：`node --check agent-skill/stackprism-site-experience/scripts/stackprism-bridge.mjs` 通过。
+- Historical item: 验证：`for f in agent-skill/stackprism-site-experience/scripts/bridge/*.mjs; do node --check "$f"; done` 通过，避免 `node --check` 只检查第一个展开文件。
+- Historical item: 验证：`node --test --test-timeout=60000 tests/stackprism-bridge.test.mjs` 通过。
+- Historical item: Commit: `feat: add node bridge script for agents`
 
 ### Task 7: 实现 Python fallback 脚本
 
@@ -1084,53 +1084,53 @@ Frame and shadow DOM rule:
 - Reuse: `tests/fixtures/bridge-url-policy-cases.json`
 - Reuse: `tests/fixtures/bridge-protocol-identifiers.json`
 
-- [ ] 使用 Python 标准库 `http.server`。
-- [ ] `stackprism_bridge.py` 只保留 CLI guard、启动参数读取和 server lifecycle；HTTP routing、capture store、URL policy、DNS、body limit、browser open、redaction 和 error response 拆入 `scripts/stackprism_bridge_lib/*.py` helper，至少包含 `http_server.py`、`capture_store.py`、`url_policy.py`、`security.py` 和 `open_browser.py`，避免单文件超 300 行。
-- [ ] 提供与 JS bridge 一致的 `/health`、`/bridge`、`POST /v1/captures`、`GET /v1/captures/{id}`、`GET /v1/captures/{id}/request`、`GET /v1/captures/{id}/control`、`GET /v1/captures/{id}/profile`、`POST /v1/captures/{id}/status`、`POST /v1/captures/{id}/profile`、`DELETE /v1/captures/{id}`。
-- [ ] 保持与 JS bridge 相同的成功 response body 和错误 envelope，不为成功响应额外包 `ok`。
-- [ ] 与 JS bridge 使用相同的统一 JSON 错误响应和 capture request validation；错误码、HTTP status 和脱敏 `details` 语义必须一致。
-- [ ] 与 JS bridge 使用相同的 method/auth/content-type 错误响应和 status phase/sequence 规则。
-- [ ] 与 JS bridge 使用相同的 `OPTIONS` preflight 拒绝、无 CORS 允许头、`Origin`/`Referer`/`Sec-Fetch-Site` 校验、no-store/nosniff/referrer-policy 响应头策略。
-- [ ] 与 JS bridge 使用相同的 request target、path/query schema、重复 header、歧义 `Content-Length`/`Transfer-Encoding` 和 `Content-Encoding` 拒绝语义；如果 Python 标准库已在 handler 前吞掉某些非法请求，测试必须记录可观测响应并确认不会进入业务 routing。
-- [ ] 与 JS bridge 使用相同的 Host 头校验语义；`tests/stackprism_bridge_py.test.mjs` 必须抽样覆盖 `/health`、`/bridge` 和 Bearer endpoint 的 Host 允许/拒绝行为。
-- [ ] 模块必须可被测试 import 而不自动启动 server；CLI 入口使用 `if __name__ == "__main__"` guard。
-- [ ] 指定 `STACKPRISM_BRIDGE_PORT` 且端口被占用时，进程必须非零退出，stderr 输出脱敏 `PORT_IN_USE`，stdout 不输出 ready JSON。
-- [ ] 与 JS bridge 一样在启动前校验环境变量：`STACKPRISM_BRIDGE_PORT` 未设置时才使用随机端口；设置后必须是 `1..65535` 的十进制整数；browser open 相关环境变量不得包含 NUL 字符。非法端口或 NUL 字符返回 `BRIDGE_INVALID_ENV`，非零退出，stdout 不输出 ready JSON，stderr 不泄露 token 或 bridge URL query；`STACKPRISM_BROWSER_OPEN_ARGS_JSON` 的非法 JSON/非数组/非字符串元素仍由打开浏览器步骤返回 `BROWSER_OPEN_FAILED`。
-- [ ] 启动成功后 stdout 只输出一行 JSON line，字段与 JS bridge 一致；其他日志写 stderr。ready JSON 必须在 server 已绑定且 endpoint 可接受请求后输出。
-- [ ] 除 `/health` 和 `/bridge` 外，所有 endpoint 都校验 Bearer token；Agent endpoint 只接受 `apiToken`，插件 endpoint 只接受对应 capture 的 `bridgeToken`，与 JS bridge 一致。
-- [ ] `GET /v1/captures/{id}` 同时支持 `apiToken` 和同 capture 的 `bridgeToken`；`GET /v1/captures/{id}/profile` 只支持 `apiToken`，与 JS bridge 一致。
-- [ ] 使用 Python 标准库 `webbrowser.open` 自动打开 bridge 页面，并支持环境变量覆盖浏览器命令；失败时返回 `BROWSER_OPEN_FAILED`。
-- [ ] Python fallback 与 JS bridge 一样，浏览器打开命令不得通过 shell 字符串拼接 bridge URL；覆盖命令只接受可执行文件路径，额外参数来自 `STACKPRISM_BROWSER_OPEN_ARGS_JSON` JSON 数组。
-- [ ] Python fallback 与 JS bridge 一样严格校验 `STACKPRISM_BROWSER_OPEN_ARGS_JSON` 为字符串数组；非法值返回 `BROWSER_OPEN_FAILED` 和脱敏 `details.reason = "invalid_open_args"`，测试使用假命令确认 bridge URL 作为单个 argv 传入。
-- [ ] 支持测试环境变量 `STACKPRISM_BRIDGE_NO_OPEN=1` 禁止自动打开浏览器，避免单元测试弹出浏览器或依赖用户桌面环境；该模式下创建 capture 不得返回 `BROWSER_OPEN_FAILED`，而是返回 `queued` 和 `bridgeUrl`。
-- [ ] 使用安全随机源生成 `apiToken`、`bridgeToken`、`sessionId`、capture `nonce`、`profileTransferId` 和 bridge 页面 CSP nonce；不得使用时间戳、计数器或 `random.random()` 生成安全边界值；token 校验使用共享 helper 和固定时间比较或等效安全比较。
-- [ ] `/bridge` URL 不包含 API token；HTML 内嵌一次性 `bridgeToken`，并设置 no-store、no-referrer、nosniff、`X-Frame-Options: DENY`、`Cross-Origin-Opener-Policy: same-origin`、`Permissions-Policy` 和不含 `unsafe-inline`、包含 `script-src 'nonce-{cspNonce}'`、`style-src 'nonce-{cspNonce}'`、`connect-src 'self'`、`frame-ancestors 'none'` 的 CSP。
-- [ ] bridge config JSON script 也必须带本次响应的 `nonce`，测试覆盖 `<script id="stackprism-agent-bridge-config" type="application/json" nonce="...">` 存在，且所有 script/style nonce 与 CSP header 中的 nonce 一致。
-- [ ] `/bridge` 响应使用 `Content-Type: text/html; charset=utf-8`，并在渲染 token 前执行 Host、request target、query schema 和来源导航校验；跨站 `Referer` 或 `Sec-Fetch-Site: cross-site` 必须返回 `ORIGIN_NOT_ALLOWED` 且不渲染 token。
-- [ ] `/bridge` 渲染前校验 `session`、`capture`、`nonce`，校验失败不输出 `bridgeToken`。
-- [ ] 与 JS bridge 一致，`bridgeToken` 首次 render 后和 claimed 后，同一 `/bridge?...nonce=...` 不得再次渲染 token。
-- [ ] 与 JS bridge 一致，bridge HTML 必须做 script-safe JSON 转义，并测试恶意 query 不会打断 JSON script 或反射为可执行 HTML。
-- [ ] 实现与 JS bridge 一致的基础 rate limit、body 大小限制和 HTTP resource policy；若标准库无法可靠支持 chunked body，必须按协议返回 `UNSUPPORTED_TRANSFER_ENCODING`，不能阻塞读取。
-- [ ] 将 URL policy 拆成可被测试调用的纯函数，接收 resolver 参数；生产 resolver 使用 `socket.getaddrinfo`，测试 resolver 使用 `tests/fixtures/bridge-url-policy-cases.json` 的固定结果，避免依赖真实 DNS。
-- [ ] 生产 DNS resolver 设置 2 秒超时，并与 JS bridge 一样 fail closed。
-- [ ] 使用生产 resolver 解析目标 hostname，并与 JS bridge 使用同一 private network 判断语义。
-- [ ] 即使 `allowPrivateNetworkTarget = true`，目标 URL 指向当前 bridge server origin 时也返回 `BRIDGE_SELF_TARGET_BLOCKED`。
-- [ ] 对插件上报的 final URL 执行同一套 URL 和 DNS 校验；失败时把 capture 标记为 `FINAL_URL_BLOCKED`。
-- [ ] `POST /v1/captures/{id}/status` 收到 `phase = "target_loaded"` 时必须校验 `finalUrl`；失败时直接返回 `409`，与 JS bridge 一致。
-- [ ] `tests/stackprism_bridge_py.test.mjs` 必须复用 `tests/fixtures/bridge-url-policy-cases.json` 并注入假 resolver，确认 Python fallback 与 JS bridge 在 URL policy 上一致。
-- [ ] `tests/stackprism_bridge_py.test.mjs` 必须复用 `tests/fixtures/bridge-protocol-identifiers.json`，确认 Python fallback 的 token/id 生成、path/query validator 和 Bearer validator 与 JS bridge 接受/拒绝结果一致。
-- [ ] 实现与 JS bridge 一致的 status 回写、control 取消和 profile 回写 endpoint；`POST /profile` 接收原始 `SiteExperienceProfile` JSON，不接收额外 wrapper，也不要求 nonce 出现在 profile body。
-- [ ] 实现与 JS bridge 一致的握手超时和 completed profile TTL；TTL 到期后状态转为 `expired` 并清除 profile body。
-- [ ] Python capture store/timer 也必须支持测试注入 clock/timer 或测试专用短时配置；专项测试不得真实等待 30 秒、60 秒或 10 分钟。
-- [ ] 实现与 JS bridge 一致的 `CAPTURE_TIMEOUT`、`cancel_requested` -> `cancelled` 状态流、10 秒 cancel 超时、terminal DELETE 返回 409；不能在 DELETE 时立刻删除 capture，也不能用 DELETE 改写已失败、已取消、已过期或已完成 capture 的终态。
-- [ ] `tests/stackprism_bridge_py.test.mjs` 抽样覆盖 JSON response content-type、`Allow` 头、stderr 脱敏、profile wrapper/schema/captureId mismatch、重复 profile 回写和超大 profile body，确认错误码与 JS bridge 一致。
-- [ ] `tests/stackprism_bridge_py.test.mjs` 抽样覆盖 request endpoint response shape：只返回 `captureId`、`sessionId`、`nonce`、`protocolVersion` 和规范化 `request`，不返回 `apiToken`、`bridgeToken`、profile body 或 callback URL。
-- [ ] 所有 Python fallback 子进程测试默认设置 `STACKPRISM_BRIDGE_NO_OPEN=1`，并用 `t.after()`、`try/finally` 或等效逻辑关闭子进程、HTTP server 和 timer；浏览器打开失败测试必须使用不会真实打开浏览器的假命令。
-- [ ] 运行 `pnpm exec prettier --check tests/stackprism_bridge_py.test.mjs`，确认 Python fallback 的 JS 测试未被格式化工具漏掉。Python fallback 只用 `py_compile` 和专项测试校验，不交给 Prettier。
-- [ ] 验证：`python3 -m py_compile agent-skill/stackprism-site-experience/scripts/stackprism_bridge.py` 通过。
-- [ ] 验证：`python3 -m compileall -q agent-skill/stackprism-site-experience/scripts/stackprism_bridge_lib` 通过，避免 shell 通配符在无匹配时传给 `py_compile`。
-- [ ] 验证：`node --test --test-timeout=60000 tests/stackprism_bridge_py.test.mjs` 启动 Python 子进程并确认 `/health` 返回一致字段。
-- [ ] Commit: `feat: add python bridge fallback script`
+- Historical item: 使用 Python 标准库 `http.server`。
+- Historical item: `stackprism_bridge.py` 只保留 CLI guard、启动参数读取和 server lifecycle；HTTP routing、capture store、URL policy、DNS、body limit、browser open、redaction 和 error response 拆入 `scripts/stackprism_bridge_lib/*.py` helper，至少包含 `http_server.py`、`capture_store.py`、`url_policy.py`、`security.py` 和 `open_browser.py`，避免单文件超 300 行。
+- Historical item: 提供与 JS bridge 一致的 `/health`、`/bridge`、`POST /v1/captures`、`GET /v1/captures/{id}`、`GET /v1/captures/{id}/request`、`GET /v1/captures/{id}/control`、`GET /v1/captures/{id}/profile`、`POST /v1/captures/{id}/status`、`POST /v1/captures/{id}/profile`、`DELETE /v1/captures/{id}`。
+- Historical item: 保持与 JS bridge 相同的成功 response body 和错误 envelope，不为成功响应额外包 `ok`。
+- Historical item: 与 JS bridge 使用相同的统一 JSON 错误响应和 capture request validation；错误码、HTTP status 和脱敏 `details` 语义必须一致。
+- Historical item: 与 JS bridge 使用相同的 method/auth/content-type 错误响应和 status phase/sequence 规则。
+- Historical item: 与 JS bridge 使用相同的 `OPTIONS` preflight 拒绝、无 CORS 允许头、`Origin`/`Referer`/`Sec-Fetch-Site` 校验、no-store/nosniff/referrer-policy 响应头策略。
+- Historical item: 与 JS bridge 使用相同的 request target、path/query schema、重复 header、歧义 `Content-Length`/`Transfer-Encoding` 和 `Content-Encoding` 拒绝语义；如果 Python 标准库已在 handler 前吞掉某些非法请求，测试必须记录可观测响应并确认不会进入业务 routing。
+- Historical item: 与 JS bridge 使用相同的 Host 头校验语义；`tests/stackprism_bridge_py.test.mjs` 必须抽样覆盖 `/health`、`/bridge` 和 Bearer endpoint 的 Host 允许/拒绝行为。
+- Historical item: 模块必须可被测试 import 而不自动启动 server；CLI 入口使用 `if __name__ == "__main__"` guard。
+- Historical item: 指定 `STACKPRISM_BRIDGE_PORT` 且端口被占用时，进程必须非零退出，stderr 输出脱敏 `PORT_IN_USE`，stdout 不输出 ready JSON。
+- Historical item: 与 JS bridge 一样在启动前校验环境变量：`STACKPRISM_BRIDGE_PORT` 未设置时才使用随机端口；设置后必须是 `1..65535` 的十进制整数；browser open 相关环境变量不得包含 NUL 字符。非法端口或 NUL 字符返回 `BRIDGE_INVALID_ENV`，非零退出，stdout 不输出 ready JSON，stderr 不泄露 token 或 bridge URL query；`STACKPRISM_BROWSER_OPEN_ARGS_JSON` 的非法 JSON/非数组/非字符串元素仍由打开浏览器步骤返回 `BROWSER_OPEN_FAILED`。
+- Historical item: 启动成功后 stdout 只输出一行 JSON line，字段与 JS bridge 一致；其他日志写 stderr。ready JSON 必须在 server 已绑定且 endpoint 可接受请求后输出。
+- Historical item: 除 `/health` 和 `/bridge` 外，所有 endpoint 都校验 Bearer token；Agent endpoint 只接受 `apiToken`，插件 endpoint 只接受对应 capture 的 `bridgeToken`，与 JS bridge 一致。
+- Historical item: `GET /v1/captures/{id}` 同时支持 `apiToken` 和同 capture 的 `bridgeToken`；`GET /v1/captures/{id}/profile` 只支持 `apiToken`，与 JS bridge 一致。
+- Historical item: 使用 Python 标准库 `webbrowser.open` 自动打开 bridge 页面，并支持环境变量覆盖浏览器命令；失败时返回 `BROWSER_OPEN_FAILED`。
+- Historical item: Python fallback 与 JS bridge 一样，浏览器打开命令不得通过 shell 字符串拼接 bridge URL；覆盖命令只接受可执行文件路径，额外参数来自 `STACKPRISM_BROWSER_OPEN_ARGS_JSON` JSON 数组。
+- Historical item: Python fallback 与 JS bridge 一样严格校验 `STACKPRISM_BROWSER_OPEN_ARGS_JSON` 为字符串数组；非法值返回 `BROWSER_OPEN_FAILED` 和脱敏 `details.reason = "invalid_open_args"`，测试使用假命令确认 bridge URL 作为单个 argv 传入。
+- Historical item: 支持测试环境变量 `STACKPRISM_BRIDGE_NO_OPEN=1` 禁止自动打开浏览器，避免单元测试弹出浏览器或依赖用户桌面环境；该模式下创建 capture 不得返回 `BROWSER_OPEN_FAILED`，而是返回 `queued` 和 `bridgeUrl`。
+- Historical item: 使用安全随机源生成 `apiToken`、`bridgeToken`、`sessionId`、capture `nonce`、`profileTransferId` 和 bridge 页面 CSP nonce；不得使用时间戳、计数器或 `random.random()` 生成安全边界值；token 校验使用共享 helper 和固定时间比较或等效安全比较。
+- Historical item: `/bridge` URL 不包含 API token；HTML 内嵌一次性 `bridgeToken`，并设置 no-store、no-referrer、nosniff、`X-Frame-Options: DENY`、`Cross-Origin-Opener-Policy: same-origin`、`Permissions-Policy` 和不含 `unsafe-inline`、包含 `script-src 'nonce-{cspNonce}'`、`style-src 'nonce-{cspNonce}'`、`connect-src 'self'`、`frame-ancestors 'none'` 的 CSP。
+- Historical item: bridge config JSON script 也必须带本次响应的 `nonce`，测试覆盖 `<script id="stackprism-agent-bridge-config" type="application/json" nonce="...">` 存在，且所有 script/style nonce 与 CSP header 中的 nonce 一致。
+- Historical item: `/bridge` 响应使用 `Content-Type: text/html; charset=utf-8`，并在渲染 token 前执行 Host、request target、query schema 和来源导航校验；跨站 `Referer` 或 `Sec-Fetch-Site: cross-site` 必须返回 `ORIGIN_NOT_ALLOWED` 且不渲染 token。
+- Historical item: `/bridge` 渲染前校验 `session`、`capture`、`nonce`，校验失败不输出 `bridgeToken`。
+- Historical item: 与 JS bridge 一致，`bridgeToken` 首次 render 后和 claimed 后，同一 `/bridge?...nonce=...` 不得再次渲染 token。
+- Historical item: 与 JS bridge 一致，bridge HTML 必须做 script-safe JSON 转义，并测试恶意 query 不会打断 JSON script 或反射为可执行 HTML。
+- Historical item: 实现与 JS bridge 一致的基础 rate limit、body 大小限制和 HTTP resource policy；若标准库无法可靠支持 chunked body，必须按协议返回 `UNSUPPORTED_TRANSFER_ENCODING`，不能阻塞读取。
+- Historical item: 将 URL policy 拆成可被测试调用的纯函数，接收 resolver 参数；生产 resolver 使用 `socket.getaddrinfo`，测试 resolver 使用 `tests/fixtures/bridge-url-policy-cases.json` 的固定结果，避免依赖真实 DNS。
+- Historical item: 生产 DNS resolver 设置 2 秒超时，并与 JS bridge 一样 fail closed。
+- Historical item: 使用生产 resolver 解析目标 hostname，并与 JS bridge 使用同一 private network 判断语义。
+- Historical item: 即使 `allowPrivateNetworkTarget = true`，目标 URL 指向当前 bridge server origin 时也返回 `BRIDGE_SELF_TARGET_BLOCKED`。
+- Historical item: 对插件上报的 final URL 执行同一套 URL 和 DNS 校验；失败时把 capture 标记为 `FINAL_URL_BLOCKED`。
+- Historical item: `POST /v1/captures/{id}/status` 收到 `phase = "target_loaded"` 时必须校验 `finalUrl`；失败时直接返回 `409`，与 JS bridge 一致。
+- Historical item: `tests/stackprism_bridge_py.test.mjs` 必须复用 `tests/fixtures/bridge-url-policy-cases.json` 并注入假 resolver，确认 Python fallback 与 JS bridge 在 URL policy 上一致。
+- Historical item: `tests/stackprism_bridge_py.test.mjs` 必须复用 `tests/fixtures/bridge-protocol-identifiers.json`，确认 Python fallback 的 token/id 生成、path/query validator 和 Bearer validator 与 JS bridge 接受/拒绝结果一致。
+- Historical item: 实现与 JS bridge 一致的 status 回写、control 取消和 profile 回写 endpoint；`POST /profile` 接收原始 `SiteExperienceProfile` JSON，不接收额外 wrapper，也不要求 nonce 出现在 profile body。
+- Historical item: 实现与 JS bridge 一致的握手超时和 completed profile TTL；TTL 到期后状态转为 `expired` 并清除 profile body。
+- Historical item: Python capture store/timer 也必须支持测试注入 clock/timer 或测试专用短时配置；专项测试不得真实等待 30 秒、60 秒或 10 分钟。
+- Historical item: 实现与 JS bridge 一致的 `CAPTURE_TIMEOUT`、`cancel_requested` -> `cancelled` 状态流、10 秒 cancel 超时、terminal DELETE 返回 409；不能在 DELETE 时立刻删除 capture，也不能用 DELETE 改写已失败、已取消、已过期或已完成 capture 的终态。
+- Historical item: `tests/stackprism_bridge_py.test.mjs` 抽样覆盖 JSON response content-type、`Allow` 头、stderr 脱敏、profile wrapper/schema/captureId mismatch、重复 profile 回写和超大 profile body，确认错误码与 JS bridge 一致。
+- Historical item: `tests/stackprism_bridge_py.test.mjs` 抽样覆盖 request endpoint response shape：只返回 `captureId`、`sessionId`、`nonce`、`protocolVersion` 和规范化 `request`，不返回 `apiToken`、`bridgeToken`、profile body 或 callback URL。
+- Historical item: 所有 Python fallback 子进程测试默认设置 `STACKPRISM_BRIDGE_NO_OPEN=1`，并用 `t.after()`、`try/finally` 或等效逻辑关闭子进程、HTTP server 和 timer；浏览器打开失败测试必须使用不会真实打开浏览器的假命令。
+- Historical item: 运行 `pnpm exec prettier --check tests/stackprism_bridge_py.test.mjs`，确认 Python fallback 的 JS 测试未被格式化工具漏掉。Python fallback 只用 `py_compile` 和专项测试校验，不交给 Prettier。
+- Historical item: 验证：`python3 -m py_compile agent-skill/stackprism-site-experience/scripts/stackprism_bridge.py` 通过。
+- Historical item: 验证：`python3 -m compileall -q agent-skill/stackprism-site-experience/scripts/stackprism_bridge_lib` 通过，避免 shell 通配符在无匹配时传给 `py_compile`。
+- Historical item: 验证：`node --test --test-timeout=60000 tests/stackprism_bridge_py.test.mjs` 启动 Python 子进程并确认 `/health` 返回一致字段。
+- Historical item: Commit: `feat: add python bridge fallback script`
 
 ### Task 8: 编写 Skill
 
@@ -1143,24 +1143,24 @@ Frame and shadow DOM rule:
 - Create: `agent-skill/stackprism-site-experience/references/agent-consumption-guide.md`
 - Modify: `.prettierignore`
 
-- [ ] `SKILL.md` 说明触发场景：复刻网站视觉、参考 UI/UX、采集技术与体验 profile。
-- [ ] `README.md` 说明 repo-local skill 的安装/发现边界：默认不自动进入 Codex 全局 Skills 列表，用户或发布流程需要复制/软链接到 `$CODEX_HOME/skills`；Agent 也可以直接按 repo path 运行脚本。
-- [ ] 明确首选 JS 脚本，Python 为 fallback。
-- [ ] 说明默认打开系统浏览器；如果插件安装在非默认浏览器，Agent 必须设置 `STACKPRISM_BROWSER_OPEN_COMMAND` 指向对应 Chrome 内核浏览器和用户 profile。
-- [ ] Skill 使用示例必须展示 bridge 子进程生命周期：启动后最多等待 10 秒读取 ready JSON，遇到超时、非 JSON、缺字段或 `protocolVersion` 不匹配时分别按 `BRIDGE_START_TIMEOUT`、`BRIDGE_READY_PARSE_FAILED`、`BRIDGE_PROTOCOL_UNSUPPORTED` 失败处理；完成 capture 或失败后在 `finally` 中发送 SIGTERM/关闭子进程，并等待退出；不得鼓励 Agent 留下常驻本地 bridge。
-- [ ] Skill 示例和 README 日志片段必须对 ready JSON 中的 `apiToken` 做脱敏；不得把原始 ready JSON 直接打印到报告、stdout 示例或错误日志。
-- [ ] 浏览器选择文档必须同时说明 `STACKPRISM_BROWSER_OPEN_COMMAND` 只接受可执行文件路径，额外用户 profile 参数必须通过 `STACKPRISM_BROWSER_OPEN_ARGS_JSON` JSON 数组传入，bridge URL 永远由脚本作为最后一个独立参数追加。
-- [ ] 文档必须说明 `STACKPRISM_BROWSER_OPEN_ARGS_JSON` 只能是 JSON 字符串数组；示例中不得把 bridge URL 写入该数组，URL 永远由脚本追加，避免用户把 token-bearing URL 放进 shell 命令或日志。
-- [ ] 说明第一版为 passive capture，不会点击、提交、登录或执行破坏性操作。
-- [ ] 说明 `viewports` 不是 CDP 移动仿真，Agent 不能把它当作真实手机截图。
-- [ ] 明确 Agent 读取 profile 后优先复刻体验，不盲目照搬技术。
-- [ ] `agents/openai.yaml` 仅作为可选 metadata 与发布辅助文件；不得在文档中声称 repo 内 `agents/openai.yaml` 会让 Codex 自动发现 Skill。Codex 自动发现仍以复制/软链接到 `$CODEX_HOME/skills` 后的 `SKILL.md` 为准。
-- [ ] schema reference 与 TypeScript schema 字段一致。
-- [ ] consumption guide 给出从 profile 到实现任务的步骤。
-- [ ] 复查 Task 6 已加入的 `.gitignore` 例外仍生效，确认以下命令退出码为 1 且无输出：`git check-ignore -v --no-index agent-skill/stackprism-site-experience/scripts/stackprism-bridge.mjs agent-skill/stackprism-site-experience/scripts/bridge/http-server.mjs agent-skill/stackprism-site-experience/scripts/stackprism_bridge.py agent-skill/stackprism-site-experience/scripts/stackprism_bridge_lib/http_server.py`。使用 `--no-index`，避免已跟踪文件让 ignore 规则检查产生假阴性。
-- [ ] `.prettierignore` 保持 Skill 脚本不被忽略；分别运行 `pnpm exec prettier --file-info agent-skill/stackprism-site-experience/scripts/stackprism-bridge.mjs` 和 `pnpm exec prettier --file-info agent-skill/stackprism-site-experience/scripts/bridge/http-server.mjs`，确认返回 JSON 中 `"ignored": false`，因为 `prettier --check` 对被 ignore 的显式路径可能不足以证明格式化覆盖真实生效。
-- [ ] 运行 `pnpm exec prettier --check agent-skill/stackprism-site-experience/SKILL.md agent-skill/stackprism-site-experience/README.md agent-skill/stackprism-site-experience/agents/openai.yaml agent-skill/stackprism-site-experience/scripts/stackprism-bridge.mjs agent-skill/stackprism-site-experience/scripts/bridge/*.mjs agent-skill/stackprism-site-experience/references/site-experience-profile-schema.md agent-skill/stackprism-site-experience/references/agent-consumption-guide.md`，确认 repo-local Skill 文档、YAML 和 JS bridge 脚本未被格式化工具漏掉。Python fallback 只用 `py_compile` 和专项测试校验，不交给 Prettier。
-- [ ] Commit: `docs: add stackprism site experience skill`
+- Historical item: `SKILL.md` 说明触发场景：复刻网站视觉、参考 UI/UX、采集技术与体验 profile。
+- Historical item: `README.md` 说明 repo-local skill 的安装/发现边界：默认不自动进入 Codex 全局 Skills 列表，用户或发布流程需要复制/软链接到 `$CODEX_HOME/skills`；Agent 也可以直接按 repo path 运行脚本。
+- Historical item: 明确首选 JS 脚本，Python 为 fallback。
+- Historical item: 说明默认打开系统浏览器；如果插件安装在非默认浏览器，Agent 必须设置 `STACKPRISM_BROWSER_OPEN_COMMAND` 指向对应 Chrome 内核浏览器和用户 profile。
+- Historical item: Skill 使用示例必须展示 bridge 子进程生命周期：启动后最多等待 10 秒读取 ready JSON，遇到超时、非 JSON、缺字段或 `protocolVersion` 不匹配时分别按 `BRIDGE_START_TIMEOUT`、`BRIDGE_READY_PARSE_FAILED`、`BRIDGE_PROTOCOL_UNSUPPORTED` 失败处理；完成 capture 或失败后在 `finally` 中发送 SIGTERM/关闭子进程，并等待退出；不得鼓励 Agent 留下常驻本地 bridge。
+- Historical item: Skill 示例和 README 日志片段必须对 ready JSON 中的 `apiToken` 做脱敏；不得把原始 ready JSON 直接打印到报告、stdout 示例或错误日志。
+- Historical item: 浏览器选择文档必须同时说明 `STACKPRISM_BROWSER_OPEN_COMMAND` 只接受可执行文件路径，额外用户 profile 参数必须通过 `STACKPRISM_BROWSER_OPEN_ARGS_JSON` JSON 数组传入，bridge URL 永远由脚本作为最后一个独立参数追加。
+- Historical item: 文档必须说明 `STACKPRISM_BROWSER_OPEN_ARGS_JSON` 只能是 JSON 字符串数组；示例中不得把 bridge URL 写入该数组，URL 永远由脚本追加，避免用户把 token-bearing URL 放进 shell 命令或日志。
+- Historical item: 说明第一版为 passive capture，不会点击、提交、登录或执行破坏性操作。
+- Historical item: 说明 `viewports` 不是 CDP 移动仿真，Agent 不能把它当作真实手机截图。
+- Historical item: 明确 Agent 读取 profile 后优先复刻体验，不盲目照搬技术。
+- Historical item: `agents/openai.yaml` 仅作为可选 metadata 与发布辅助文件；不得在文档中声称 repo 内 `agents/openai.yaml` 会让 Codex 自动发现 Skill。Codex 自动发现仍以复制/软链接到 `$CODEX_HOME/skills` 后的 `SKILL.md` 为准。
+- Historical item: schema reference 与 TypeScript schema 字段一致。
+- Historical item: consumption guide 给出从 profile 到实现任务的步骤。
+- Historical item: 复查 Task 6 已加入的 `.gitignore` 例外仍生效，确认以下命令退出码为 1 且无输出：`git check-ignore -v --no-index agent-skill/stackprism-site-experience/scripts/stackprism-bridge.mjs agent-skill/stackprism-site-experience/scripts/bridge/http-server.mjs agent-skill/stackprism-site-experience/scripts/stackprism_bridge.py agent-skill/stackprism-site-experience/scripts/stackprism_bridge_lib/http_server.py`。使用 `--no-index`，避免已跟踪文件让 ignore 规则检查产生假阴性。
+- Historical item: `.prettierignore` 保持 Skill 脚本不被忽略；分别运行 `pnpm exec prettier --file-info agent-skill/stackprism-site-experience/scripts/stackprism-bridge.mjs` 和 `pnpm exec prettier --file-info agent-skill/stackprism-site-experience/scripts/bridge/http-server.mjs`，确认返回 JSON 中 `"ignored": false`，因为 `prettier --check` 对被 ignore 的显式路径可能不足以证明格式化覆盖真实生效。
+- Historical item: 运行 `pnpm exec prettier --check agent-skill/stackprism-site-experience/SKILL.md agent-skill/stackprism-site-experience/README.md agent-skill/stackprism-site-experience/agents/openai.yaml agent-skill/stackprism-site-experience/scripts/stackprism-bridge.mjs agent-skill/stackprism-site-experience/scripts/bridge/*.mjs agent-skill/stackprism-site-experience/references/site-experience-profile-schema.md agent-skill/stackprism-site-experience/references/agent-consumption-guide.md`，确认 repo-local Skill 文档、YAML 和 JS bridge 脚本未被格式化工具漏掉。Python fallback 只用 `py_compile` 和专项测试校验，不交给 Prettier。
+- Historical item: Commit: `docs: add stackprism site experience skill`
 
 ### Task 9: 文档与开发手册
 
@@ -1177,23 +1177,23 @@ Frame and shadow DOM rule:
 - Modify: `README.md`
 - Modify: `docs/guide/basic-usage.md`
 
-- [ ] 记录 Agent Bridge 数据流、API、profile schema、安全约束。
-- [ ] `PRIVACY.md` 写清楚新增采集边界、不会采集的敏感数据类型、loopback bridge 和 token 生命周期。
-- [ ] `docs/dev/agent-bridge.md`、`PRIVACY.md`、`README.md` 与 `docs/guide/basic-usage.md` 明确本机信任边界：Agent Bridge 只防跨站网页和误用路径，不防同机恶意进程伪造兼容 loopback bridge；需要该级别隔离时应转向 Native Messaging 或等效本机 broker。
-- [ ] `README.md` 与 `docs/guide/basic-usage.md` 说明 Agent Bridge 需要已安装扩展、默认 passive capture、失败路径和浏览器选择方式。
-- [ ] `README.md`、`docs/guide/basic-usage.md` 和 Skill 使用说明必须说明首次使用前需要在设置页启用 Agent Bridge；若未启用，Skill 示例必须把 `AGENT_BRIDGE_DISABLED` 显示为用户可操作错误，而不是重试或降级。
-- [ ] 用户文档和设置页文案必须说明 Agent Bridge 启用状态是当前浏览器 profile 的本机设置，不随 Chrome sync 同步到其他设备；换设备、换浏览器 profile 或重装扩展后需要重新显式启用。
-- [ ] `docs/dev/agent-bridge.md`、`PRIVACY.md`、`README.md` 与 `docs/guide/basic-usage.md` 必须明确同浏览器其他扩展不在第一版防护范围内；建议用户在干净浏览器 profile 或只安装可信扩展的 profile 中使用 Agent Bridge。
-- [ ] `docs/dev/release.md` 增加 Chrome Web Store / Edge Add-ons 发布前人工检查项：如果发布 Agent Bridge，需要同步商店隐私披露、数据用途说明和用户可见说明，明确数据会被发送到用户本机 loopback bridge 供本地 Agent 读取，但不会发送到 StackPrism 远程服务器。
-- [ ] `docs/dev/release.md` 明确 `agent-skill/` 是 repo-local Agent 工具，不属于浏览器扩展运行时；Chrome Web Store / Edge Add-ons 上传包只能来自 `dist/`，不得把 `agent-skill/`、本地 HTTP bridge 脚本、测试 fixture、`docs/superpowers/` 或 Python 字节码缓存打入 zip/crx。
-- [ ] `.github/workflows/release-extension.yml` 在打包 zip/crx 前运行 `pnpm run lint`、`pnpm run build:injected`、`pnpm run test:unit` 和 `pnpm run typecheck`；若 `typecheck` 仍包含最终 `pnpm build`，不得再用旧 `dist/` 打包。
-- [ ] `.github/workflows/release-extension.yml` 在 zip 前增加 dist hygiene 检查：确认 `dist/manifest.json` 不含 `externally_connectable`，`web_accessible_resources` 不暴露 `agent-skill/`、`stackprism-bridge.mjs`、`stackprism_bridge.py` 或 `experience-profiler.iife.js`（除非已有独立文档理由和最小 match），并确认 `dist/` 内不存在 `agent-skill/`、`docs/superpowers/`、`tests/`、`*.py`、`__pycache__/` 或本地 bridge server helper 源文件。
-- [ ] `docs/.vitepress/config.ts` 的开发手册 sidebar 加入 `/dev/agent-bridge`。
-- [ ] release checklist 增加 bridge smoke test。
-- [ ] detection-flow 增加 agent capture 管道。
-- [ ] 运行 `pnpm exec prettier --check docs/dev/agent-bridge.md docs/dev/index.md docs/dev/architecture.md docs/dev/detection-flow.md docs/dev/release.md docs/.vitepress/config.ts README.md PRIVACY.md docs/guide/basic-usage.md`，确认 Task 9 修改的 Markdown/VitePress 配置未被格式化工具漏掉。
-- [ ] 验证：`pnpm run docs:build` 通过。
-- [ ] Commit: `docs: document agent bridge workflow`
+- Historical item: 记录 Agent Bridge 数据流、API、profile schema、安全约束。
+- Historical item: `PRIVACY.md` 写清楚新增采集边界、不会采集的敏感数据类型、loopback bridge 和 token 生命周期。
+- Historical item: `docs/dev/agent-bridge.md`、`PRIVACY.md`、`README.md` 与 `docs/guide/basic-usage.md` 明确本机信任边界：Agent Bridge 只防跨站网页和误用路径，不防同机恶意进程伪造兼容 loopback bridge；需要该级别隔离时应转向 Native Messaging 或等效本机 broker。
+- Historical item: `README.md` 与 `docs/guide/basic-usage.md` 说明 Agent Bridge 需要已安装扩展、默认 passive capture、失败路径和浏览器选择方式。
+- Historical item: `README.md`、`docs/guide/basic-usage.md` 和 Skill 使用说明必须说明首次使用前需要在设置页启用 Agent Bridge；若未启用，Skill 示例必须把 `AGENT_BRIDGE_DISABLED` 显示为用户可操作错误，而不是重试或降级。
+- Historical item: 用户文档和设置页文案必须说明 Agent Bridge 启用状态是当前浏览器 profile 的本机设置，不随 Chrome sync 同步到其他设备；换设备、换浏览器 profile 或重装扩展后需要重新显式启用。
+- Historical item: `docs/dev/agent-bridge.md`、`PRIVACY.md`、`README.md` 与 `docs/guide/basic-usage.md` 必须明确同浏览器其他扩展不在第一版防护范围内；建议用户在干净浏览器 profile 或只安装可信扩展的 profile 中使用 Agent Bridge。
+- Historical item: `docs/dev/release.md` 增加 Chrome Web Store / Edge Add-ons 发布前人工检查项：如果发布 Agent Bridge，需要同步商店隐私披露、数据用途说明和用户可见说明，明确数据会被发送到用户本机 loopback bridge 供本地 Agent 读取，但不会发送到 StackPrism 远程服务器。
+- Historical item: `docs/dev/release.md` 明确 `agent-skill/` 是 repo-local Agent 工具，不属于浏览器扩展运行时；Chrome Web Store / Edge Add-ons 上传包只能来自 `dist/`，不得把 `agent-skill/`、本地 HTTP bridge 脚本、测试 fixture、`docs/superpowers/` 或 Python 字节码缓存打入 zip/crx。
+- Historical item: `.github/workflows/release-extension.yml` 在打包 zip/crx 前运行 `pnpm run lint`、`pnpm run build:injected`、`pnpm run test:unit` 和 `pnpm run typecheck`；若 `typecheck` 仍包含最终 `pnpm build`，不得再用旧 `dist/` 打包。
+- Historical item: `.github/workflows/release-extension.yml` 在 zip 前增加 dist hygiene 检查：确认 `dist/manifest.json` 不含 `externally_connectable`，`web_accessible_resources` 不暴露 `agent-skill/`、`stackprism-bridge.mjs`、`stackprism_bridge.py` 或 `experience-profiler.iife.js`（除非已有独立文档理由和最小 match），并确认 `dist/` 内不存在 `agent-skill/`、`docs/superpowers/`、`tests/`、`*.py`、`__pycache__/` 或本地 bridge server helper 源文件。
+- Historical item: `docs/.vitepress/config.ts` 的开发手册 sidebar 加入 `/dev/agent-bridge`。
+- Historical item: release checklist 增加 bridge smoke test。
+- Historical item: detection-flow 增加 agent capture 管道。
+- Historical item: 运行 `pnpm exec prettier --check docs/dev/agent-bridge.md docs/dev/index.md docs/dev/architecture.md docs/dev/detection-flow.md docs/dev/release.md docs/.vitepress/config.ts README.md PRIVACY.md docs/guide/basic-usage.md`，确认 Task 9 修改的 Markdown/VitePress 配置未被格式化工具漏掉。
+- Historical item: 验证：`pnpm run docs:build` 通过。
+- Historical item: Commit: `docs: document agent bridge workflow`
 
 ### Task 10: 端到端验证与收口
 
