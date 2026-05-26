@@ -1,0 +1,8 @@
+name: stackprism-site-experience
+version: 0.1.0
+description: Collect StackPrism site experience profiles through a local loopback bridge.
+entrypoint: SKILL.md
+auto_discovery: false
+notes:
+  - This repo-local metadata file does not install the skill globally.
+  - Run bridge scripts by repository path unless the skill is copied into a global registry.

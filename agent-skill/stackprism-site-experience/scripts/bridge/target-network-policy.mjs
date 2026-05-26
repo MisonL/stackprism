@@ -1,0 +1,43 @@
+import net from 'node:net'
+import { isPrivateIpLiteral } from './url-policy.mjs'
+
+const invalidNetworkAddress = () => ({
+  ok: false,
+  code: 'INVALID_REQUEST',
+  message: 'Target network address is invalid.',
+  details: { reason: 'invalid_network_address' }
+})
+
+const normalizeNetworkAddress = value => value.trim().replace(/^\[|\]$/g, '')
+
+export const validateTargetNetworkAddress = (value, request, { fromCache = false } = {}) => {
+  if (request.options?.allowPrivateNetworkTarget === true) {
+    return { ok: true }
+  }
+  if (fromCache === true || value === undefined || value === null) {
+    return {
+      ok: false,
+      code: 'FINAL_URL_BLOCKED',
+      message: 'Final URL is blocked by target policy.',
+      details: { reason: 'target_network_address_unverified' }
+    }
+  }
+  if (typeof value !== 'string') return invalidNetworkAddress()
+  const address = normalizeNetworkAddress(value)
+  if (!address) {
+    return {
+      ok: false,
+      code: 'FINAL_URL_BLOCKED',
+      message: 'Final URL is blocked by target policy.',
+      details: { reason: 'target_network_address_unverified' }
+    }
+  }
+  if (net.isIP(address) === 0) return invalidNetworkAddress()
+  if (!isPrivateIpLiteral(address)) return { ok: true }
+  return {
+    ok: false,
+    code: 'FINAL_URL_BLOCKED',
+    message: 'Final URL is blocked by target policy.',
+    details: { reason: 'private_network_address' }
+  }
+}
