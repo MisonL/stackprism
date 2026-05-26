@@ -69,3 +69,13 @@ React                                         [高置信度]
 弹窗整体高度锁定 600px，只有**技术列表区域**自己滚动。顶部工具栏、概览、分类过滤栏始终可见。
 
 列表向下滚超过约 240px 时右下角浮出一个圆形按钮（向上箭头），点击平滑滚回顶部。
+
+## Agent Bridge
+
+Agent Bridge 是面向本机 AI Agent 的可选能力。启用后，本机 Agent 可以通过 `127.0.0.1` bridge 读取当前浏览器可观测的技术栈、视觉、布局、组件、交互和资源摘要，用于生成相似体验的实现方案。
+
+该能力默认关闭，需要在设置页显式开启。启用状态只保存在当前浏览器 profile 的本机 `chrome.storage.local`，不会随 Chrome sync 同步到其他设备或其他 profile；换设备、换浏览器 profile 或重装扩展后需要重新开启。
+
+Agent Bridge 使用 passive capture，不会点击页面、提交表单、登录账号或执行破坏性操作。`viewports` 只写入 profile 请求上下文，不是 CDP 移动仿真或真实手机截图。它不会要求您点击插件按钮、复制 JSON 或下载文件，但本版本信任您本机启动的 bridge 进程，不防同机恶意进程或同浏览器 profile 中其他恶意扩展。
+
+如果 StackPrism 安装在非默认浏览器或非默认 profile，本机 Agent 需要设置 `STACKPRISM_BROWSER_OPEN_COMMAND` 指向对应 Chrome 内核浏览器，并通过 `STACKPRISM_BROWSER_OPEN_ARGS_JSON` JSON 字符串数组传入用户 profile 参数；bridge URL 永远由脚本作为最后一个参数追加。未启用时会返回 `AGENT_BRIDGE_DISABLED`，打开到未安装扩展的浏览器或 profile 时通常会返回 `EXTENSION_NOT_CONNECTED`，这些都是需要用户处理的配置错误，不应由 Agent 静默重试或降级。
