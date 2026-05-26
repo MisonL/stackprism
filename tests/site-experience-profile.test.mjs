@@ -288,7 +288,18 @@ test('builds a redacted site experience profile from raw popup data and experien
         focusHoverHints: ['.cta:hover{background:url("https://cdn.example.com/hover.png?preview=abc&token=secret#frag")}'],
         closedShadowRoots: 1
       },
-      ux: { textSamples: ['联系 user@example.com 或 13800138000，订单 1234567890123，金额 ￥199，联系人 张三'] },
+      document: { language: 'zh-CN' },
+      ux: {
+        pagePurpose: 'SaaS dashboard token=secret',
+        primaryUserPath: 'Open reports and export data',
+        informationHierarchy: ['Header', 'KPI cards', 'Report table'],
+        ctaStrategy: ['Export report', 'Create task'],
+        trustSignals: ['SOC2 badge'],
+        navigationDepth: 'top-nav + side-nav',
+        contentGrouping: ['summary', 'details'],
+        frictionPoints: ['Long table without visible filters'],
+        textSamples: ['联系 user@example.com 或 13800138000，订单 1234567890123，金额 ￥199，联系人 张三']
+      },
       assets: { urls: ['https://cdn.example.com/private.woff2?token=abc#font'] },
       evidence: {
         inaccessibleStylesheets: 2,
@@ -305,8 +316,16 @@ test('builds a redacted site experience profile from raw popup data and experien
   assert.equal(profile.captureId, 'cap_CCCCCCCCCCCCCCCCCCCCCC')
   assert.deepEqual(profile.browserContext.extensionCapabilities, capabilities)
   assert.equal(profile.browserContext.viewportMode, 'current_viewport')
+  assert.equal(profile.target.language, 'zh-CN')
   assert.equal(profile.techProfile.technologies.length, 2)
   assert.equal(profile.assetProfile.resourceUrls.length, 2)
+  assert.equal(profile.uxProfile.pagePurpose, 'SaaS dashboard token=[redacted]')
+  assert.deepEqual(profile.uxProfile.informationHierarchy, ['Header', 'KPI cards', 'Report table'])
+  assert.deepEqual(profile.uxProfile.ctaStrategy, ['Export report', 'Create task'])
+  assert.deepEqual(profile.uxProfile.trustSignals, ['SOC2 badge'])
+  assert.equal(profile.uxProfile.navigationDepth, 'top-nav + side-nav')
+  assert.deepEqual(profile.uxProfile.contentGrouping, ['summary', 'details'])
+  assert.deepEqual(profile.uxProfile.frictionPoints, ['Long table without visible filters'])
   assert.equal(profile.evidence.truncation.resourceUrls, 3)
   assert.equal(profile.visualProfile.aboveFold, undefined)
   assert.equal(profile.layoutProfile.boundingBoxes, undefined)

@@ -6,6 +6,10 @@ const smokeSource = await readFile(new URL('./agent-bridge-browser-smoke.mjs', i
 const harnessSource = await readFile(new URL('./helpers/agent-bridge-browser-smoke-harness.mjs', import.meta.url), 'utf8')
 const e2eReport = await readFile(new URL('../docs/reviews/CR-AGENT-BRIDGE-E2E-2026-05-22.md', import.meta.url), 'utf8')
 const completionAudit = await readFile(new URL('../docs/reviews/CR-AGENT-BRIDGE-COMPLETION-AUDIT-2026-05-24.md', import.meta.url), 'utf8')
+const implementationPlan = await readFile(
+  new URL('../docs/superpowers/plans/2026-05-21-stackprism-agent-bridge-plan.md', import.meta.url),
+  'utf8'
+)
 
 test('browser smoke summaries do not print token prefixes', () => {
   assert.doesNotMatch(smokeSource, /\bapiTokenPrefix\b/)
@@ -41,6 +45,19 @@ test('current reports separate public complex-site proof from default policy pro
   assert.match(smokeSource, /privateNetworkOverrideUsed: true/)
 })
 
+test('default browser smoke uses fixture-backed capture as the deterministic success path', () => {
+  const e2eCurrentSummary = sectionBetween(e2eReport, 'This report is no longer', '## Current Verification')
+  const latestSmoke = sectionBetween(e2eReport, 'Latest successful smoke:', '## Remaining Risks')
+
+  assert.match(smokeSource, /const defaultTargetUrl = fixture\.url/)
+  assert.doesNotMatch(smokeSource, /process\.env\.STACKPRISM_BROWSER_SMOKE_TARGET_URL \|\| 'https:\/\/example\.com'/)
+  assert.doesNotMatch(smokeSource, /Example capture creation failed/)
+  assert.doesNotMatch(smokeSource, /Example capture did not complete/)
+  assert.match(e2eCurrentSummary, /default smoke success path is fixture-backed/)
+  assert.match(latestSmoke, /Default smoke success path: fixture-backed/)
+  assert.doesNotMatch(latestSmoke, /Extension version: `1\.3\.71`/)
+})
+
 test('current reports keep incognito live metadata branch unproven', () => {
   const e2eRemainingRisks = sectionFrom(e2eReport, '## Remaining Risks')
   const e2eAdditionalChecks = sectionBetween(e2eReport, 'Additional focused checks recorded for this slice:', 'Environment note:')
@@ -65,6 +82,25 @@ test('current reports keep incognito live metadata branch unproven', () => {
   assert.doesNotMatch(currentStatus, /精确 incognito `INCOGNITO_NOT_SUPPORTED` 浏览器元数据路径.*已完成/)
 })
 
+test('implementation plan carries a current status overlay instead of looking fully unchecked', () => {
+  const statusOverlay = sectionBetween(implementationPlan, '## 当前实现状态', '## 总目标')
+  const task10 = sectionBetween(implementationPlan, '### Task 10: 端到端验证与收口', '## 安全门禁')
+
+  assert.match(statusOverlay, /可用第一版已落地/)
+  assert.match(statusOverlay, /不能按原计划标记为全量完成/)
+  assert.match(statusOverlay, /Task 10 状态矩阵/)
+  assert.match(statusOverlay, /外部或未触发 gate/)
+  assert.match(statusOverlay, /Chrome Web Store \/ Edge Add-ons/)
+  assert.match(statusOverlay, /运行中 idle-driven service worker eviction/)
+  assert.match(statusOverlay, /精确 incognito `INCOGNITO_NOT_SUPPORTED` live/)
+  assert.match(task10, /Current status source/)
+  assert.match(task10, /\| Default browser smoke\s+\| Complete locally\s+\|/)
+  assert.match(task10, /\| Store release and disclosure\s+\| External gate\s+\|/)
+  assert.match(task10, /Use a real public URL only as an explicit external-target scenario/)
+  assert.match(task10, /External gates retained after local completion/)
+  assert.doesNotMatch(task10, /\n- \[ \]/)
+})
+
 test('current verification records the latest unit test count', () => {
   const e2eCurrentVerification = sectionBetween(e2eReport, '## Current Verification', '## Browser Smoke')
   const task10Matrix = sectionBetween(completionAudit, 'Task 10 当前共有', '## Verification Run')
@@ -85,7 +121,8 @@ test('current verification records the latest unit test count', () => {
   assert.doesNotMatch(e2eCurrentVerification, /211 tests passed, 0 failed/)
   assert.doesNotMatch(e2eCurrentVerification, /212 tests passed, 0 failed/)
   assert.doesNotMatch(e2eCurrentVerification, /213 tests passed, 0 failed/)
-  assert.match(e2eCurrentVerification, /219 tests passed, 0 failed/)
+  assert.doesNotMatch(e2eCurrentVerification, /219 tests passed, 0 failed/)
+  assert.match(e2eCurrentVerification, /222 tests passed, 0 failed/)
   assert.doesNotMatch(task10Matrix, /最新 `pnpm run test:unit` 为 180 tests passed/)
   assert.doesNotMatch(task10Matrix, /最新 `pnpm run test:unit` 为 198 tests passed/)
   assert.doesNotMatch(task10Matrix, /最新 `pnpm run test:unit` 为 199 tests passed/)
@@ -101,7 +138,8 @@ test('current verification records the latest unit test count', () => {
   assert.doesNotMatch(task10Matrix, /最新 `pnpm run test:unit` 为 211 tests passed/)
   assert.doesNotMatch(task10Matrix, /最新 `pnpm run test:unit` 为 212 tests passed/)
   assert.doesNotMatch(task10Matrix, /最新 `pnpm run test:unit` 为 213 tests passed/)
-  assert.match(task10Matrix, /最新 `pnpm run test:unit` 为 219 tests passed/)
+  assert.doesNotMatch(task10Matrix, /最新 `pnpm run test:unit` 为 219 tests passed/)
+  assert.match(task10Matrix, /最新 `pnpm run test:unit` 为 222 tests passed/)
 })
 
 test('current reports include fresh lint and typecheck gate evidence', () => {
@@ -286,13 +324,15 @@ test('current reports include live target URL validation evidence', () => {
   assert.match(verificationRun, /STACKPRISM_BROWSER_SMOKE_SCENARIO=target-url-validation STACKPRISM_BROWSER_SMOKE_CDP_PORT=9563/)
 })
 
-test('completion audit records current worktree hygiene counts', () => {
+test('completion audit records handoff baseline as clean', () => {
   const currentStatus = sectionFrom(completionAudit, '## Current Status')
 
   assert.doesNotMatch(currentStatus, /47 个 unstaged 文件/)
-  assert.match(currentStatus, /52 个 staged 文件/)
-  assert.match(currentStatus, /39 个 unstaged 文件/)
-  assert.match(currentStatus, /4 个 untracked Agent Bridge 文件/)
+  assert.doesNotMatch(currentStatus, /52 个 staged 文件/)
+  assert.doesNotMatch(currentStatus, /39 个 unstaged 文件/)
+  assert.doesNotMatch(currentStatus, /4 个 untracked Agent Bridge 文件/)
+  assert.match(currentStatus, /交接基线状态：工作区干净/)
+  assert.match(currentStatus, /本分支已推送到 `origin\/codex\/agent-bridge-implementation`/)
 })
 
 const assertNoReportTokenPrefix = source => {

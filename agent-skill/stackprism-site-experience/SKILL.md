@@ -44,7 +44,7 @@ Call `POST /v1/captures` with `Authorization: Bearer {apiToken}`:
 
 ```json
 {
-  "url": "https://example.com",
+  "url": "https://target.example",
   "mode": "experience",
   "waitMs": 3000,
   "include": ["tech", "visual", "layout", "components", "interaction", "ux", "assets"],
@@ -59,6 +59,8 @@ Call `POST /v1/captures` with `Authorization: Bearer {apiToken}`:
   }
 }
 ```
+
+Use the real target URL for the task. Do not treat `https://example.com` as the default smoke target; in some local DNS-proxy environments public hostnames can resolve to `198.18.*` and correctly fail closed unless private-network targets are explicitly allowed for a controlled test.
 
 Then poll `GET /v1/captures/{id}` and read `GET /v1/captures/{id}/profile` when status is `completed`.
 

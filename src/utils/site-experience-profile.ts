@@ -195,13 +195,28 @@ const buildInteractionProfile = (experience: any): Record<string, unknown> => {
   return sanitizeRecord(interaction)
 }
 
+const redactTextList = (values: unknown, limit = Infinity): string[] =>
+  cleanStringArray(values).map(redactText).filter(Boolean).slice(0, limit)
+
 const buildUxProfile = (experience: any): Record<string, unknown> => {
   const ux = experience?.ux || {}
   if (!isRecord(ux) || !Object.keys(ux).length) return {}
   return sanitizeRecord({
-    ...ux,
-    textSamples: cleanStringArray(ux.textSamples).map(redactText)
+    pagePurpose: redactText(ux.pagePurpose),
+    primaryUserPath: redactTextList(ux.primaryUserPath, 12),
+    informationHierarchy: redactTextList(ux.informationHierarchy, 20),
+    ctaStrategy: redactTextList(ux.ctaStrategy, 20),
+    trustSignals: redactTextList(ux.trustSignals, 20),
+    navigationDepth: redactText(ux.navigationDepth),
+    contentGrouping: redactTextList(ux.contentGrouping, 24),
+    frictionPoints: redactTextList(ux.frictionPoints, 12),
+    textSamples: redactTextList(ux.textSamples, 80)
   })
+}
+
+const buildTargetLanguage = (experience: any): string => {
+  const documentLanguage = isRecord(experience?.document) ? experience.document.language : ''
+  return cleanInlineText(documentLanguage || experience?.language || '')
 }
 
 export interface BuildSiteExperienceProfileInput {
@@ -259,7 +274,7 @@ export const buildSiteExperienceProfile = (input: BuildSiteExperienceProfileInpu
         }
       })(),
       title: redactText(input.raw?.title || ''),
-      language: '',
+      language: buildTargetLanguage(input.experience),
       viewportProfiles: input.request.viewports.map(viewport => ({
         name: cleanInlineText(viewport.name || ''),
         width: viewport.width,

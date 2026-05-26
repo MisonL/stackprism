@@ -235,6 +235,51 @@ const collectTextSamples = (nodes: Element[], truncation: Truncation): string[] 
   return samples
 }
 
+const collectElementLabels = (selector: string, limit: number): string[] => {
+  const labels: string[] = []
+  for (const element of [...document.querySelectorAll(selector)]) {
+    uniquePush(labels, element.getAttribute('aria-label') || element.textContent, limit)
+    if (labels.length >= limit) break
+  }
+  return labels
+}
+
+const inferPagePurpose = (): string => {
+  if (document.querySelector('main form, form[action], input, textarea, select')) return 'form_flow'
+  if (document.querySelector('table, [role="table"], [class*="dashboard" i], [class*="chart" i]')) return 'data_display'
+  if (document.querySelector('article, [class*="docs" i], [class*="blog" i]')) return 'content_or_docs'
+  if (document.querySelector('[class*="pricing" i], [class*="hero" i], [id*="hero" i]')) return 'marketing'
+  return 'unknown'
+}
+
+const inferFrictionPoints = (): string[] => {
+  const points: string[] = []
+  if (!document.querySelector('h1')) uniquePush(points, 'missing_h1', 8)
+  if (document.querySelectorAll('form input[required], form textarea[required], form select[required]').length > 5)
+    uniquePush(points, 'many_required_fields', 8)
+  if (document.querySelectorAll('button, a, [role="button"]').length === 0) uniquePush(points, 'no_visible_actions', 8)
+  return points
+}
+
+const collectUxSignals = (nodes: Element[], truncation: Truncation) => {
+  const navLinks = document.querySelectorAll('nav a, [role="navigation"] a').length
+  const formControls = document.querySelectorAll('input, textarea, select').length
+  return {
+    pagePurpose: inferPagePurpose(),
+    primaryUserPath: collectElementLabels('main button, main a, [role="main"] button, [role="main"] a', 12),
+    informationHierarchy: collectElementLabels('h1, h2, h3, [role="heading"]', 20),
+    ctaStrategy: collectElementLabels('button, a, [role="button"], input[type="submit"]', 20),
+    trustSignals: collectElementLabels(
+      '[class*="trust" i], [class*="testimonial" i], [class*="review" i], [class*="security" i], [class*="privacy" i], footer',
+      20
+    ),
+    navigationDepth: `nav_links:${navLinks}; form_controls:${formControls}`,
+    contentGrouping: collectElementLabels('section, article, aside, [class*="card" i], [class*="panel" i]', 24),
+    frictionPoints: inferFrictionPoints(),
+    textSamples: collectTextSamples(nodes, truncation)
+  }
+}
+
 const collectAssets = (truncation: Truncation) => {
   const urls = [
     ...[...document.scripts].map(item => item.src),
@@ -269,6 +314,7 @@ const collectSiteExperienceProfile = () => {
       components: { samples: [] },
       interaction: { passive: true },
       ux: { textSamples: [] },
+      document: { language: '' },
       assets: { urls: [] },
       evidence: { truncation },
       limitations: ['document_unavailable']
@@ -286,7 +332,8 @@ const collectSiteExperienceProfile = () => {
     layout: collectLayout(nodes),
     components: { samples: components.samples, counts: components.counts },
     interaction: collectInteraction(nodes, cssSignals),
-    ux: { textSamples: collectTextSamples(nodes, truncation) },
+    ux: collectUxSignals(nodes, truncation),
+    document: { language: cleanText(document.documentElement.lang || document.body?.getAttribute('lang') || '', 40) },
     assets: collectAssets(truncation),
     evidence: { inaccessibleStylesheets: cssSignals.inaccessibleStylesheets, ...boundaries, truncation },
     limitations: [
