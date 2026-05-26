@@ -7,7 +7,6 @@ const LIMITS = {
   resourceUrls: 300,
   executeScriptResultBytes: 2 * 1024 * 1024
 } as const
-
 type Truncation = {
   domNodes: number
   componentSamples: number
@@ -16,7 +15,6 @@ type Truncation = {
   resourceUrls: number
   executeScriptResult: number
 }
-
 const emptyTruncation = (): Truncation => ({
   domNodes: 0,
   componentSamples: 0,
@@ -25,22 +23,24 @@ const emptyTruncation = (): Truncation => ({
   resourceUrls: 0,
   executeScriptResult: 0
 })
-
 const cleanText = (value: unknown, limit = 140): string =>
   String(value ?? '')
     .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[redacted]')
     .replace(/\b(?:\+?\d[\d\s-]{8,}\d|\d{11,})\b/g, '[redacted]')
     .replace(/(?:[￥$€£]\s*\d+(?:\.\d+)?)/g, '[redacted]')
-    .replace(/\b(token|secret|session|auth|authorization|key|signature|password|pass|cookie)\s*[:=]\s*[^,\s;&]+/gi, '$1=[redacted]')
+    .replace(
+      /\b([A-Za-z0-9_-]*(?:token|secret|session|auth|authorization|key|signature|password|pass|cookie)[A-Za-z0-9_-]*)\s*[:=]\s*[^,\s;&]+/gi,
+      '$1=[redacted]'
+    )
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, limit)
 
+const includeScreenshotMetadata = (): boolean => Boolean((globalThis as any).__STACKPRISM_EXPERIENCE_OPTIONS__?.captureScreenshotMetadata)
 const uniquePush = (target: string[], value: unknown, limit = 80): void => {
   const clean = cleanText(value, 180)
   if (clean && !target.includes(clean) && target.length < limit) target.push(clean)
 }
-
 const safeUrl = (value: unknown): string => {
   try {
     const url = new URL(String(value || ''), location.href)
@@ -54,27 +54,18 @@ const safeUrl = (value: unknown): string => {
     return ''
   }
 }
-
 const safeRect = (element: Element) => {
   try {
     const rect = element.getBoundingClientRect()
-    return {
-      x: Math.round(rect.x),
-      y: Math.round(rect.y),
-      width: Math.round(rect.width),
-      height: Math.round(rect.height)
-    }
+    return { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) }
   } catch {
     return null
   }
 }
-
 const selectNodes = (): Element[] => {
   if (typeof document === 'undefined') return []
-  const nodes = [...document.querySelectorAll('body *')].slice(0, LIMITS.nodes)
-  return nodes.filter(node => node instanceof Element)
+  return [...document.querySelectorAll('body *')].slice(0, LIMITS.nodes)
 }
-
 const collectVisual = (nodes: Element[]) => {
   const colors: string[] = []
   const fonts: string[] = []
@@ -104,6 +95,7 @@ const collectVisual = (nodes: Element[]) => {
 }
 
 const collectLayout = (nodes: Element[]) => {
+  const includeMetadata = includeScreenshotMetadata()
   const landmarks = [
     'header',
     'nav',
@@ -118,19 +110,27 @@ const collectLayout = (nodes: Element[]) => {
     .filter(selector => document.querySelector(selector))
     .map(selector => selector.replace(/\[role="(.+)"\]/, 'role:$1'))
   const keySelectors = ['header', 'nav', 'main', 'footer', 'aside', 'section', 'article', '[class*="hero" i]', '[id*="hero" i]']
-  const boundingBoxes = keySelectors
-    .flatMap(selector => [...document.querySelectorAll(selector)].slice(0, 8))
-    .map(element => ({ selector: element.tagName.toLowerCase(), text: cleanText(element.textContent, 80), rect: safeRect(element) }))
-    .filter(item => item.rect)
-    .slice(0, 40)
-  const aboveFoldCount = nodes.filter(node => {
-    const rect = safeRect(node)
-    return rect && rect.y >= 0 && rect.y < window.innerHeight
-  }).length
-  return { landmarks, boundingBoxes, aboveFold: { elementCount: aboveFoldCount, viewportHeight: window.innerHeight } }
+  const boundingBoxes = includeMetadata
+    ? keySelectors
+        .flatMap(selector => [...document.querySelectorAll(selector)].slice(0, 8).map(element => ({ selector, element })))
+        .map(({ selector, element }) => ({ selector, text: cleanText(element.textContent, 80), rect: safeRect(element) }))
+        .filter(item => item.rect)
+        .slice(0, 40)
+    : []
+  const aboveFoldCount = includeMetadata
+    ? nodes.filter(node => {
+        const rect = safeRect(node)
+        return rect && rect.y >= 0 && rect.y < window.innerHeight
+      }).length
+    : 0
+  return {
+    landmarks,
+    ...(includeMetadata ? { boundingBoxes, aboveFold: { elementCount: aboveFoldCount, viewportHeight: window.innerHeight } } : {})
+  }
 }
 
 const collectComponents = () => {
+  const includeMetadata = includeScreenshotMetadata()
   const definitions = [
     ['button', 'button, [role="button"]'],
     ['input', 'input, textarea, select'],
@@ -149,7 +149,12 @@ const collectComponents = () => {
     counts[type] = matches.length
     for (const element of matches) {
       if (samples.length >= LIMITS.componentSamples) break
-      samples.push({ type, tag: element.tagName.toLowerCase(), text: cleanText(element.textContent, 80), rect: safeRect(element) })
+      samples.push({
+        type,
+        tag: element.tagName.toLowerCase(),
+        text: cleanText(element.textContent, 80),
+        ...(includeMetadata ? { rect: safeRect(element) } : {})
+      })
     }
   }
   return { samples, counts, omitted: Math.max(0, Object.values(counts).reduce((sum, count) => sum + count, 0) - samples.length) }
@@ -158,10 +163,12 @@ const collectComponents = () => {
 const collectCssSignals = () => {
   let inaccessibleStylesheets = 0
   let scannedRules = 0
+  let totalRules = 0
   const hoverOrFocusRules: string[] = []
   for (const sheet of [...document.styleSheets]) {
     try {
       const rules = [...(sheet.cssRules || [])]
+      totalRules += rules.length
       for (const rule of rules) {
         if (scannedRules >= LIMITS.cssRules) break
         scannedRules += 1
@@ -172,7 +179,7 @@ const collectCssSignals = () => {
       inaccessibleStylesheets += 1
     }
   }
-  return { inaccessibleStylesheets, scannedRules, hoverOrFocusRules, omittedCssRules: Math.max(0, scannedRules - LIMITS.cssRules) }
+  return { inaccessibleStylesheets, scannedRules, hoverOrFocusRules, omittedCssRules: Math.max(0, totalRules - scannedRules) }
 }
 
 const collectInteraction = (nodes: Element[], cssSignals: ReturnType<typeof collectCssSignals>) => {

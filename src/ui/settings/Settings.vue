@@ -53,6 +53,17 @@
       </div>
     </section>
 
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Agent Bridge</h2>
+      </div>
+      <label class="toggle-item agent-bridge-toggle">
+        <Checkbox v-model="state.settings.agentBridgeEnabled" />
+        启用本机 Agent Bridge
+      </label>
+      <p class="hint">允许本机 Agent 通过 127.0.0.1 bridge 读取浏览器可观测的技术与体验摘要。该设置只保存在当前浏览器 profile。</p>
+    </section>
+
     <section class="panel two-column">
       <div>
         <h2>禁用指定技术</h2>
@@ -176,7 +187,7 @@
   import { applyCustomCss } from '@/utils/apply-custom-css'
   import { cleanCustomRules, cleanStringArray, defaultSettings, normalizeSettings } from '@/utils/normalize-settings'
   import { buildRuleContributionUrl } from '@/utils/build-issue-url'
-  import { REPOSITORY_URL, SETTINGS_STORAGE_KEY, STATUS_HIDE_DELAY } from '@/utils/constants'
+  import { AGENT_BRIDGE_ENABLED_STORAGE_KEY, REPOSITORY_URL, SETTINGS_STORAGE_KEY, STATUS_HIDE_DELAY } from '@/utils/constants'
   import { ALLOWED_CONFIDENCES, ALLOWED_MATCH_TARGETS, ALLOWED_MATCH_TYPES, CUSTOM_RULE_LIMITS } from '@/types/settings'
   import { cycleTheme, getStoredTheme, setStoredTheme, themeLabel, type ThemeMode } from '@/utils/theme'
 
@@ -469,8 +480,17 @@
 
   const loadSettings = async () => {
     try {
-      const stored = await chrome.storage.sync.get(SETTINGS_STORAGE_KEY)
-      return normalizeSettings(stored[SETTINGS_STORAGE_KEY])
+      const [stored, local] = await Promise.all([
+        chrome.storage.sync.get(SETTINGS_STORAGE_KEY),
+        chrome.storage.local.get(SETTINGS_STORAGE_KEY)
+      ])
+      return normalizeSettings(
+        {
+          ...stored[SETTINGS_STORAGE_KEY],
+          agentBridgeEnabled: local[SETTINGS_STORAGE_KEY]?.[AGENT_BRIDGE_ENABLED_STORAGE_KEY]
+        },
+        { allowAgentBridge: true }
+      )
     } catch {
       return defaultSettings()
     }
@@ -632,14 +652,27 @@
     collectCategorySettings()
     const jsonRules = parseRulesJsonTextarea()
     if (!jsonRules) return
-    const settings = normalizeSettings({
-      disabledCategories: state.settings.disabledCategories,
-      disabledTechnologies: cleanStringArray(lines(disabledTechnologiesText.value)),
-      customRules: jsonRules,
-      customCss: customCssText.value
+    const settings = normalizeSettings(
+      {
+        disabledCategories: state.settings.disabledCategories,
+        disabledTechnologies: cleanStringArray(lines(disabledTechnologiesText.value)),
+        customRules: jsonRules,
+        customCss: customCssText.value,
+        agentBridgeEnabled: state.settings.agentBridgeEnabled
+      },
+      { allowAgentBridge: true }
+    )
+    const syncSettings = normalizeSettings({
+      disabledCategories: settings.disabledCategories,
+      disabledTechnologies: settings.disabledTechnologies,
+      customRules: settings.customRules,
+      customCss: settings.customCss
     })
     try {
-      await chrome.storage.sync.set({ [SETTINGS_STORAGE_KEY]: settings })
+      await Promise.all([
+        chrome.storage.sync.set({ [SETTINGS_STORAGE_KEY]: syncSettings }),
+        chrome.storage.local.set({ [SETTINGS_STORAGE_KEY]: { [AGENT_BRIDGE_ENABLED_STORAGE_KEY]: settings.agentBridgeEnabled } })
+      ])
       state.settings = settings
       syncFromSettings()
       applyCustomCss(settings.customCss)
@@ -652,8 +685,17 @@
   const resetSettings = async () => {
     if (!confirm('确定恢复默认设置？自定义规则和自定义 CSS 会被清空。')) return
     state.settings = defaultSettings()
+    const syncDefaults = normalizeSettings({
+      disabledCategories: state.settings.disabledCategories,
+      disabledTechnologies: state.settings.disabledTechnologies,
+      customRules: state.settings.customRules,
+      customCss: state.settings.customCss
+    })
     try {
-      await chrome.storage.sync.set({ [SETTINGS_STORAGE_KEY]: state.settings })
+      await Promise.all([
+        chrome.storage.sync.set({ [SETTINGS_STORAGE_KEY]: syncDefaults }),
+        chrome.storage.local.remove(SETTINGS_STORAGE_KEY)
+      ])
       clearRuleForm()
       syncFromSettings()
       applyCustomCss('')

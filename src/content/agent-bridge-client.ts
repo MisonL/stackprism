@@ -1,16 +1,18 @@
 import {
   REQUIRED_AGENT_BRIDGE_CAPABILITIES,
+  AGENT_BRIDGE_ERROR_CODES,
   bridgeProtocolVersion,
-  validateProtocolIdentifier,
   type AgentBridgeCapabilities,
   type AgentBridgeError,
   type AgentBridgeRuntimeMessage,
-  type AgentCaptureRequest,
   type AgentCaptureStatus
 } from '@/types/agent-bridge'
 import { registerProfileTransferListener } from './agent-bridge-transfer'
+import { isBridgePageUrl, parseBridgePageContext, validateCaptureRequestEnvelope, type BridgePageContext } from './agent-bridge-request'
 
-const BRIDGE_META_SELECTOR = 'meta[name="stackprism-agent-bridge"][content="stackprism-agent-bridge"]'
+export { isBridgePageUrl, parseBridgePageContext, validateCaptureRequestEnvelope } from './agent-bridge-request'
+
+const BRIDGE_META_SELECTOR = 'meta[name="stackprism-agent-bridge"][content="1"]'
 const CONFIG_SELECTOR = '#stackprism-agent-bridge-config[type="application/json"]'
 const STATUS_PHASES = new Set([
   'bridge_connected',
@@ -23,75 +25,38 @@ const STATUS_PHASES = new Set([
   'cleanup'
 ])
 const CONTROL_POLL_MS = 1000
-const KNOWN_ERROR_CODES = new Set([
-  'INVALID_REQUEST',
-  'BRIDGE_REQUEST_MISMATCH',
-  'BRIDGE_PROTOCOL_UNSUPPORTED',
-  'AGENT_BRIDGE_DISABLED',
-  'NOT_SUPPORTED',
-  'PROFILE_TRANSPORT_FAILED'
-])
+const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled', 'expired'])
+const KNOWN_ERROR_CODES = new Set<string>(AGENT_BRIDGE_ERROR_CODES)
 
-interface BridgePageContext {
-  bridgeOrigin: string
-  sessionId: string
-  captureId: string
-  nonce: string
-  bridgeToken: string
-  protocolVersion: number
-}
-
-export const isBridgePageUrl = (value: unknown): boolean => {
-  try {
-    const url = new URL(String(value || ''))
-    return url.protocol === 'http:' && url.hostname === '127.0.0.1' && url.pathname === '/bridge'
-  } catch {
-    return false
-  }
-}
-
-export const parseBridgePageContext = (href: string, configText: string): BridgePageContext => {
-  const url = new URL(href)
-  const sessionId = url.searchParams.get('session') || ''
-  const captureId = url.searchParams.get('capture') || ''
-  const nonce = url.searchParams.get('nonce') || ''
-  const config = JSON.parse(configText || '{}')
-  const bridgeToken = String(config.bridgeToken || '')
-  const protocolVersion = Number(config.protocolVersion)
-
-  if (
-    !validateProtocolIdentifier('sessionId', sessionId) ||
-    !validateProtocolIdentifier('captureId', captureId) ||
-    !validateProtocolIdentifier('nonce', nonce) ||
-    !validateProtocolIdentifier('bridgeToken', bridgeToken)
-  ) {
-    throw new Error('INVALID_REQUEST')
-  }
-
-  return { bridgeOrigin: url.origin, sessionId, captureId, nonce, bridgeToken, protocolVersion }
-}
-
-export const validateCaptureRequestEnvelope = (context: BridgePageContext, value: any): AgentCaptureRequest => {
-  if (
-    value?.captureId !== context.captureId ||
-    value?.sessionId !== context.sessionId ||
-    value?.nonce !== context.nonce ||
-    value?.protocolVersion !== bridgeProtocolVersion
-  ) {
-    throw new Error('BRIDGE_REQUEST_MISMATCH')
-  }
-  return value.request as AgentCaptureRequest
-}
-
-const makeError = (code: AgentBridgeError['code'], message: string): AgentBridgeError => ({ code, message })
+const makeError = (code: AgentBridgeError['code'], message: string, details: Record<string, unknown> = {}): AgentBridgeError => ({
+  code,
+  message,
+  details
+})
 
 const errorFromUnknown = (error: unknown, fallback: AgentBridgeError['code']): AgentBridgeError => {
+  const bridgeError = (error as { bridgeError?: AgentBridgeError } | null)?.bridgeError
+  if (bridgeError?.code) return bridgeError
   const message = error instanceof Error ? error.message : String(error || fallback)
   const code = KNOWN_ERROR_CODES.has(message) ? (message as AgentBridgeError['code']) : fallback
-  return makeError(code, message)
+  return makeError(code, KNOWN_ERROR_CODES.has(message) ? message : 'Agent Bridge request failed.')
 }
 
-const requestJson = async (context: BridgePageContext, path: string, init: RequestInit = {}) => {
+const readBridgeJson = async (response: Response): Promise<any> => {
+  try {
+    return await response.json()
+  } catch {
+    return {
+      error: {
+        code: 'PROFILE_TRANSPORT_FAILED',
+        message: 'Agent Bridge returned a non-JSON response.',
+        details: { status: response.status }
+      }
+    }
+  }
+}
+
+export const requestJson = async (context: BridgePageContext, path: string, init: RequestInit = {}) => {
   const response = await fetch(`${context.bridgeOrigin}${path}`, {
     ...init,
     headers: {
@@ -101,25 +66,42 @@ const requestJson = async (context: BridgePageContext, path: string, init: Reque
     },
     cache: 'no-store'
   })
-  if (!response.ok) throw new Error(`BRIDGE_HTTP_${response.status}`)
-  return response.json()
+  const body = await readBridgeJson(response)
+  if (!response.ok) {
+    const error = new Error(body?.error?.code || `BRIDGE_HTTP_${response.status}`) as Error & { bridgeError?: AgentBridgeError }
+    error.bridgeError = body?.error || {
+      code: 'PROFILE_TRANSPORT_FAILED',
+      message: 'Agent Bridge request failed.',
+      details: { status: response.status }
+    }
+    throw error
+  }
+  return body
 }
 
 const createStatusPoster = (context: BridgePageContext) => {
   let sequence = 0
-  return async (status: AgentCaptureStatus, phase?: string, error?: AgentBridgeError) => {
+  return async (
+    status: AgentCaptureStatus,
+    phase?: string,
+    error?: AgentBridgeError,
+    extra: Record<string, unknown> = {},
+    requestInit: RequestInit = {}
+  ) => {
     sequence += 1
     await requestJson(context, `/v1/captures/${context.captureId}/status`, {
       method: 'POST',
+      ...requestInit,
       body: JSON.stringify({
         captureId: context.captureId,
         sessionId: context.sessionId,
         nonce: context.nonce,
         protocolVersion: bridgeProtocolVersion,
         status,
-        phase: phase && STATUS_PHASES.has(phase) ? phase : undefined,
+        phase: normalizeWritableStatusPhase(status, phase && STATUS_PHASES.has(phase) ? phase : undefined),
         sequence,
-        error
+        error,
+        ...extra
       })
     })
   }
@@ -128,16 +110,27 @@ const createStatusPoster = (context: BridgePageContext) => {
 const hasRequiredCapabilities = (capabilities: AgentBridgeCapabilities): boolean =>
   REQUIRED_AGENT_BRIDGE_CAPABILITIES.every(capability => capabilities?.[capability] === true)
 
+const missingRequiredCapability = (capabilities: AgentBridgeCapabilities): string | undefined =>
+  REQUIRED_AGENT_BRIDGE_CAPABILITIES.find(capability => capabilities?.[capability] !== true)
+
+export const normalizeWritableStatusPhase = (status: AgentCaptureStatus, phase?: string): string | undefined =>
+  status === 'failed' || status === 'cancelled' ? 'cleanup' : phase
+
 const sendRuntimeMessage = (message: AgentBridgeRuntimeMessage): Promise<any> =>
   new Promise(resolve => {
     chrome.runtime.sendMessage(message, response => resolve(response))
   })
 
+const isIncognitoExtensionContext = (): boolean =>
+  (chrome as { extension?: { inIncognitoContext?: boolean } }).extension?.inIncognitoContext === true
+
 const startControlPolling = (context: BridgePageContext) => {
-  window.setInterval(() => {
+  const intervalId = window.setInterval(() => {
     requestJson(context, `/v1/captures/${context.captureId}/control`)
       .then(control => {
+        if (TERMINAL_STATUSES.has(String(control?.status || ''))) window.clearInterval(intervalId)
         if (control?.command === 'cancel') {
+          window.clearInterval(intervalId)
           return sendRuntimeMessage({
             type: 'AGENT_CAPTURE_CONTROL',
             captureId: context.captureId,
@@ -149,6 +142,25 @@ const startControlPolling = (context: BridgePageContext) => {
       })
       .catch(() => {})
   }, CONTROL_POLL_MS)
+  return () => window.clearInterval(intervalId)
+}
+
+const registerCaptureStatusListener = (
+  postStatus: (status: AgentCaptureStatus, phase?: string, error?: AgentBridgeError, extra?: Record<string, unknown>) => Promise<void>,
+  stopControlPolling: () => void
+) => {
+  chrome.runtime.onMessage.addListener((message: AgentBridgeRuntimeMessage, _sender, sendResponse) => {
+    if (message?.type !== 'AGENT_CAPTURE_STATUS') return false
+    if (TERMINAL_STATUSES.has(message.payload.status)) stopControlPolling()
+    postStatus(message.payload.status, message.payload.phase, message.payload.error, {
+      finalUrl: message.payload.finalUrl,
+      targetNetworkAddress: message.payload.targetNetworkAddress,
+      targetNetworkFromCache: message.payload.targetNetworkFromCache
+    })
+      .then(() => sendResponse({ ok: true, data: null }))
+      .catch(error => sendResponse({ ok: false, error: error.bridgeError || errorFromUnknown(error, 'BRIDGE_TRANSPORT_DISCONNECTED') }))
+    return true
+  })
 }
 
 const runAgentBridgeClient = async () => {
@@ -164,18 +176,56 @@ const runAgentBridgeClient = async () => {
     return
   }
   const postStatus = createStatusPoster(context)
+  let terminalStatusPosted = false
+  let stopControlPolling = () => {}
+  const postTrackedStatus = async (
+    status: AgentCaptureStatus,
+    phase?: string,
+    error?: AgentBridgeError,
+    extra: Record<string, unknown> = {},
+    requestInit: RequestInit = {}
+  ) => {
+    if (TERMINAL_STATUSES.has(status)) {
+      terminalStatusPosted = true
+      stopControlPolling()
+    }
+    await postStatus(status, phase, error, extra, requestInit)
+  }
+  const postBridgeClosed = () => {
+    if (terminalStatusPosted) return
+    if (context.bridgeOrigin !== location.origin || !isBridgePageUrl(location.href)) return
+    terminalStatusPosted = true
+    postStatus('failed', 'cleanup', makeError('BRIDGE_TAB_CLOSED', 'Agent bridge page was closed.'), {}, { keepalive: true }).catch(
+      () => {}
+    )
+  }
+  window.addEventListener('pagehide', postBridgeClosed, { once: true })
+  window.addEventListener('beforeunload', postBridgeClosed, { once: true })
   document.documentElement.dataset.stackprismAgentBridgeClient = 'ready'
 
   try {
-    if (context.protocolVersion !== bridgeProtocolVersion) {
-      await postStatus('failed', 'bridge_connected', makeError('BRIDGE_PROTOCOL_UNSUPPORTED', 'Bridge protocol version is unsupported.'))
+    if (isIncognitoExtensionContext()) {
+      await postTrackedStatus(
+        'failed',
+        'bridge_connected',
+        makeError('INCOGNITO_NOT_SUPPORTED', 'Incognito bridge pages are not supported.')
+      )
       return
     }
 
-    registerProfileTransferListener(context, postStatus, (path, init) => requestJson(context, path, init))
+    if (context.protocolVersion !== bridgeProtocolVersion) {
+      await postTrackedStatus(
+        'failed',
+        'bridge_connected',
+        makeError('BRIDGE_PROTOCOL_UNSUPPORTED', 'Bridge protocol version is unsupported.')
+      )
+      return
+    }
+
+    registerCaptureStatusListener(postTrackedStatus, () => stopControlPolling())
     const requestEnvelope = await requestJson(context, `/v1/captures/${context.captureId}/request`)
     const request = validateCaptureRequestEnvelope(context, requestEnvelope)
-    await postStatus('waiting_extension', 'request_loaded')
+    await postTrackedStatus('waiting_extension', 'request_loaded')
     const hello = await sendRuntimeMessage({
       type: 'AGENT_BRIDGE_HELLO',
       captureId: context.captureId,
@@ -184,13 +234,20 @@ const runAgentBridgeClient = async () => {
       protocolVersion: bridgeProtocolVersion
     })
     if (!hello?.ok) {
-      await postStatus('failed', 'bridge_connected', hello?.error || makeError('INVALID_REQUEST', 'Agent bridge hello failed.'))
+      await postTrackedStatus('failed', 'bridge_connected', hello?.error || makeError('INVALID_REQUEST', 'Agent bridge hello failed.'))
       return
     }
     if (!hasRequiredCapabilities(hello.data.capabilities)) {
-      await postStatus('failed', 'bridge_connected', makeError('NOT_SUPPORTED', 'Required extension capabilities are missing.'))
+      const missingCapability = missingRequiredCapability(hello.data.capabilities)
+      await postTrackedStatus(
+        'failed',
+        'bridge_connected',
+        makeError('NOT_SUPPORTED', 'Required extension capabilities are missing.', { missingCapability })
+      )
       return
     }
+    registerProfileTransferListener(context, postTrackedStatus, (path, init) => requestJson(context, path, init))
+    await postTrackedStatus('running', 'target_opening')
     const startResponse = await sendRuntimeMessage({
       type: 'START_AGENT_CAPTURE',
       captureId: context.captureId,
@@ -201,16 +258,24 @@ const runAgentBridgeClient = async () => {
       capabilities: hello.data.capabilities
     })
     if (!startResponse?.ok) {
-      await postStatus('failed', 'target_opening', startResponse?.error || makeError('INVALID_REQUEST', 'Agent capture start failed.'))
+      await postTrackedStatus(
+        'failed',
+        'target_opening',
+        startResponse?.error || makeError('INVALID_REQUEST', 'Agent capture start failed.')
+      )
       return
     }
-    await postStatus('running', 'target_opening')
-    startControlPolling(context)
+    stopControlPolling = startControlPolling(context)
   } catch (error) {
-    await postStatus('failed', 'bridge_connected', errorFromUnknown(error, 'PROFILE_TRANSPORT_FAILED')).catch(() => {})
+    await postTrackedStatus('failed', 'bridge_connected', errorFromUnknown(error, 'PROFILE_TRANSPORT_FAILED')).catch(() => {})
   }
 }
 
 if (typeof window !== 'undefined' && typeof document !== 'undefined' && typeof chrome !== 'undefined' && chrome.runtime) {
-  runAgentBridgeClient().catch(() => {})
+  runAgentBridgeClient().catch(error => {
+    console.error('[StackPrism Agent Bridge] runAgentBridgeClient failed', {
+      errorCode: errorFromUnknown(error, 'PROFILE_TRANSPORT_FAILED').code
+    })
+    document.documentElement.dataset.stackprismAgentBridgeError = 'PROFILE_TRANSPORT_FAILED'
+  })
 }
