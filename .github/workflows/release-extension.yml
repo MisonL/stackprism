@@ -37,8 +37,96 @@ jobs:
       - name: 安装依赖
         run: pnpm install --frozen-lockfile
 
-      - name: 构建扩展
+      - name: Lint
+        run: pnpm run lint
+
+      - name: 构建注入脚本
+        run: pnpm run build:injected
+
+      - name: 单元测试
+        run: pnpm run test:unit
+
+      - name: 类型检查（仓库脚本会刷新 dist）
+        run: pnpm run typecheck
+
+      - name: 文档构建
+        run: pnpm run docs:build
+
+      - name: 发布前刷新扩展 dist
         run: pnpm run build
+
+      - name: 校验发布产物边界
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          node --input-type=module <<'NODE'
+          import { readdirSync, readFileSync, statSync } from 'node:fs'
+          import { join, relative } from 'node:path'
+
+          const root = 'dist'
+          const manifest = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'))
+          const failures = []
+          const agentOnlySourceFiles = [
+            'stackprism-bridge.mjs',
+            'stackprism_bridge.py',
+            'capture-store.mjs',
+            'http-handlers.mjs',
+            'http-server.mjs',
+            'open-browser.mjs',
+            'protocol.mjs',
+            'security.mjs',
+            'url-policy.mjs'
+          ]
+          const agentOnlyPathPatterns = [
+            /(?:^|\/)agent-skill(?:\/|$)/,
+            /(?:^|\/)docs\/superpowers(?:\/|$)/,
+            /(?:^|\/)tests(?:\/|$)/
+          ]
+
+          if (Object.prototype.hasOwnProperty.call(manifest, 'externally_connectable')) {
+            failures.push('dist/manifest.json must not expose externally_connectable')
+          }
+
+          for (const resource of manifest.web_accessible_resources || []) {
+            for (const path of resource.resources || []) {
+              if (
+                agentOnlyPathPatterns.some(pattern => pattern.test(path)) ||
+                agentOnlySourceFiles.some(file => path.includes(file)) ||
+                path.includes('experience-profiler.iife.js')
+              ) {
+                failures.push(`web_accessible_resources exposes agent-only path: ${path}`)
+              }
+            }
+          }
+
+          const disallowed = [
+            ...agentOnlyPathPatterns,
+            /(?:^|\/)__pycache__(?:\/|$)/,
+            /\.py[co]?$/,
+            ...agentOnlySourceFiles.map(file => new RegExp(`${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`))
+          ]
+
+          const walk = dir => {
+            for (const entry of readdirSync(dir)) {
+              const full = join(dir, entry)
+              const rel = relative(root, full)
+              if (statSync(full).isDirectory()) {
+                walk(full)
+                continue
+              }
+              if (disallowed.some(pattern => pattern.test(rel))) {
+                failures.push(`dist contains agent-only or test artifact: ${rel}`)
+              }
+            }
+          }
+          walk(root)
+
+          if (failures.length) {
+            for (const failure of failures) console.error(`::error::${failure}`)
+            process.exit(1)
+          }
+          NODE
 
       - name: 读取版本号并校验
         id: meta
