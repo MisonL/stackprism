@@ -34,9 +34,6 @@ StackPrism(以下简称 **栈棱镜**)是一款基于 **Chrome / Edge Manifest V
 
 - **MV3 service worker 架构**:无后台常驻进程,事件驱动,内存占用低
 - **规则即数据**:50+ 个 JSON 规则文件(`public/rules/`)集中维护,构建期预编译 hint prefilter 与 keyword 合并正则,运行时只跑命中候选
-- **伪造检测**:响应头里同时出现 ≥4 种主体身份字段(`server`、`x-aspnet-*`、`x-drupal-*`、`x-powered-cms`、`x-varnish` 等),或 `server` 字段拼了多个产品,自动降级所有相关类目的置信度并附警示
-- **自指抑制**:身在 github.com / x.com / npmmirror.com 等 50+ 主流站点时,自动不再把同名服务列为"使用的技术"
-- **HTTP 版本识别**:从 `webRequest.statusLine` 提取真实协商版本,绕开跨域 `Timing-Allow-Origin` 限制
 
 ### 识别覆盖
 
