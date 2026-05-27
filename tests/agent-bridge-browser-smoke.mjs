@@ -17,7 +17,7 @@ const cdpBaseUrl = `http://127.0.0.1:${cdpPort}`
 const hasMetadataKey = value => {
   if (!value || typeof value !== 'object') return false
   if (Array.isArray(value)) return value.some(hasMetadataKey)
-  return Object.entries(value).some(([key, item]) => /^(boundingBoxes|aboveFold|rect)$/i.test(key) || hasMetadataKey(item))
+  return Object.entries(value).some(([key, item]) => /^(boundingBoxes|boundingBox|bounds|aboveFold|rect)$/i.test(key) || hasMetadataKey(item))
 }
 
 const hasScreenshotPayloadKey = value => {
