@@ -563,6 +563,28 @@ print(json.dumps(open_browser(${JSON.stringify(bridgeUrl)}, {
   }
 })
 
+test('python fallback open-browser helper selects platform default opener without shell parsing', () => {
+  const parsed = pythonOneShot(`
+from stackprism_bridge_lib.open_browser import resolve_browser_open_command
+
+checks = {
+    "darwin": resolve_browser_open_command({}, "Darwin"),
+    "windows": resolve_browser_open_command({}, "Windows"),
+    "linux": resolve_browser_open_command({}, "Linux"),
+    "custom": resolve_browser_open_command({
+        "STACKPRISM_BROWSER_OPEN_COMMAND": "/usr/bin/google-chrome",
+        "STACKPRISM_BROWSER_OPEN_ARGS_JSON": json.dumps(["--profile-directory=Default"]),
+    }, "Linux"),
+}
+print(json.dumps(checks, sort_keys=True))
+`)
+
+  assert.deepEqual(parsed.darwin, [true, { command: 'open', args: [] }])
+  assert.deepEqual(parsed.windows, [true, { command: 'rundll32.exe', args: ['url.dll,FileProtocolHandler'] }])
+  assert.deepEqual(parsed.linux, [true, { command: 'xdg-open', args: [] }])
+  assert.deepEqual(parsed.custom, [true, { command: '/usr/bin/google-chrome', args: ['--profile-directory=Default'] }])
+})
+
 test('python fallback bridge page has CSP nonce and script-safe config', async () => {
   const { child, ready } = await startPythonBridge()
   try {
