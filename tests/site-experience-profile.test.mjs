@@ -281,9 +281,10 @@ test('builds a redacted site experience profile from raw popup data and experien
     experience: {
       visual: { colors: ['#123456'], aboveFold: { heroText: 'Hi user@example.com' } },
       layout: { landmarks: ['header', 'main'], boundingBoxes: [{ text: 'secret@example.com', x: 1, y: 2 }] },
-      components: { samples: [{ type: 'button', text: '支付 ￥199 给 张三 13800138000' }] },
+      components: { counts: { button: 2, card: 1 }, samples: [{ type: 'button', text: '支付 ￥199 给 张三 13800138000' }] },
       interaction: {
         passive: true,
+        transitions: ['opacity 0.2s'],
         animations: ['fade'],
         focusHoverHints: ['.cta:hover{background:url("https://cdn.example.com/hover.png?preview=abc&token=secret#frag")}'],
         closedShadowRoots: 1
@@ -340,6 +341,21 @@ test('builds a redacted site experience profile from raw popup data and experien
   assert.ok(profile.limitations.includes('css_rules_truncated'))
   assert.match(profile.agentGuidance.summary, /Vue/)
   assert.doesNotMatch(profile.agentGuidance.summary, /secret|user@example\.com|13800138000|\u0000/)
+  assert.match(profile.agentGuidance.recreationPlan.objective, /Recreate/)
+  assert.deepEqual(profile.agentGuidance.recreationPlan.designTokens.colors, ['#123456'])
+  assert.deepEqual(profile.agentGuidance.recreationPlan.layoutBlueprint.landmarks, ['header', 'main'])
+  assert.deepEqual(profile.agentGuidance.recreationPlan.layoutBlueprint.contentGrouping, ['summary', 'details'])
+  assert.equal(profile.agentGuidance.recreationPlan.layoutBlueprint.viewportMode, 'current_viewport')
+  assert.deepEqual(profile.agentGuidance.recreationPlan.componentInventory.priorityTypes, ['button', 'card'])
+  assert.equal(profile.agentGuidance.recreationPlan.componentInventory.sampleCount, 1)
+  assert.equal(profile.agentGuidance.recreationPlan.componentInventory.geometryIncluded, false)
+  assert.deepEqual(profile.agentGuidance.recreationPlan.interactionChecklist.transitions, ['opacity 0.2s'])
+  assert.deepEqual(profile.agentGuidance.recreationPlan.uxChecklist.ctaStrategy, ['Export report', 'Create task'])
+  assert.equal(profile.agentGuidance.recreationPlan.assetHints.scriptCount, 1)
+  assert.equal(profile.agentGuidance.recreationPlan.assetHints.stylesheetCount, 1)
+  assert.deepEqual(profile.agentGuidance.recreationPlan.assetHints.resourceDomains, ['cdn.example.com:3'])
+  assert.equal(profile.agentGuidance.recreationPlan.assetHints.resourceUrlCount, 2)
+  assert.equal(profile.agentGuidance.recreationPlan.verificationChecklist.length > 0, true)
   assert.deepEqual(profile.visualProfile.colorTokens, ['#123456'])
   assert.doesNotMatch(serialized, /secret|Bearer|user@example\.com|13800138000|1234567890123|￥199|张三|preview=abc|#frag/)
   for (const url of [
@@ -376,6 +392,15 @@ test('agent guidance sanitizes external profile labels before composing summary'
   assert.match(guidance.summary, /token=\[redacted\]/)
   assert.match(guidance.summary, /session=\[redacted\]/)
   assert.match(guidance.summary, /联系人 \[redacted\]/)
+  assert.doesNotMatch(JSON.stringify(guidance.recreationPlan), /secret|user@example\.com|张三|\u0000/)
+
+  const unsafeGuidance = buildAgentGuidance({}, [], {
+    visualProfile: { colorTokens: ['token=secret'] },
+    uxProfile: { ctaStrategy: ['联系 user@example.com'] },
+    assetProfile: { resourceDomains: [{ domain: 'cdn.example.com?token=secret', count: 2 }] }
+  })
+  assert.match(JSON.stringify(unsafeGuidance.recreationPlan), /token=\[redacted\]/)
+  assert.doesNotMatch(JSON.stringify(unsafeGuidance.recreationPlan), /secret|user@example\.com/)
 })
 
 test('returns empty sections and section limitations when include excludes experience data', async () => {
@@ -419,6 +444,8 @@ test('returns empty sections and section limitations when include excludes exper
   assert.deepEqual(profile.interactionProfile, {})
   assert.deepEqual(profile.uxProfile, {})
   assert.deepEqual(profile.assetProfile, {})
+  assert.deepEqual(profile.agentGuidance.recreationPlan.designTokens.colors, [])
+  assert.deepEqual(profile.agentGuidance.recreationPlan.componentInventory.priorityTypes, [])
   for (const section of ['visual', 'layout', 'components', 'interaction', 'ux', 'assets']) {
     assert.ok(profile.limitations.includes(`${section}_section_not_requested`))
   }
@@ -522,11 +549,59 @@ test('retains screenshot metadata fields only when explicitly requested', async 
   assert.deepEqual(profile.visualProfile.aboveFold, { heroText: 'Lead' })
   assert.equal(profile.layoutProfile.boundingBoxes[0].selector, 'main')
   assert.deepEqual(profile.componentProfile.samples[0].rect, { x: 5, y: 6, width: 7, height: 8 })
+  assert.equal(profile.agentGuidance.recreationPlan.componentInventory.geometryIncluded, true)
   assert.equal(profile.limitations.includes('screenshot_metadata_not_requested'), false)
   assert.equal(JSON.stringify(profile).includes('imageData'), false)
 })
 
-test('uses profiler truncation evidence and strips component rect metadata when screenshots are disabled', async () => {
+test('marks component geometry metadata for boundingBox and bounds aliases', async () => {
+  const { buildSiteExperienceProfile } = await loadTsModule('src/utils/site-experience-profile.ts')
+  const baseInput = {
+    captureId: 'cap_CCCCCCCCCCCCCCCCCCCCCC',
+    request: {
+      url: 'https://example.com/',
+      mode: 'experience',
+      waitMs: 0,
+      include: ['components'],
+      viewports: [],
+      options: {
+        forceRefresh: false,
+        captureScreenshotMetadata: true,
+        keepTabOpen: false,
+        allowPrivateNetworkTarget: false,
+        targetMode: 'new_tab',
+        maxResourceUrls: 300
+      },
+      protocolVersion: 1
+    },
+    raw: null,
+    capabilities: {
+      agentBridge: true,
+      siteExperienceProfileV1: true,
+      profileChunkTransport: true,
+      bridgeContentPost: true,
+      storageSession: true,
+      experienceProfiler: true,
+      rawProfile: false,
+      viewportMetadata: true
+    },
+    finalUrl: 'https://example.com/'
+  }
+
+  for (const geometryKey of ['boundingBox', 'bounds']) {
+    const profile = buildSiteExperienceProfile({
+      ...baseInput,
+      experience: {
+        components: { samples: [{ type: 'button', text: 'Buy', [geometryKey]: { x: 1, y: 2, width: 3, height: 4 } }] },
+        evidence: { truncation: {} }
+      }
+    })
+
+    assert.equal(profile.agentGuidance.recreationPlan.componentInventory.geometryIncluded, true)
+  }
+})
+
+test('uses profiler truncation evidence and strips screenshot metadata aliases when screenshots are disabled', async () => {
   const { buildSiteExperienceProfile } = await loadTsModule('src/utils/site-experience-profile.ts')
   const profile = buildSiteExperienceProfile({
     captureId: 'cap_CCCCCCCCCCCCCCCCCCCCCC',
@@ -548,7 +623,24 @@ test('uses profiler truncation evidence and strips component rect metadata when 
     },
     raw: null,
     experience: {
-      components: { samples: [{ type: 'button', text: 'Buy', rect: { x: 1, y: 2, width: 3, height: 4 } }] },
+      visual: { colors: ['#123456'], bounds: { x: 1, y: 2, width: 3, height: 4 } },
+      layout: {
+        landmarks: ['main'],
+        rect: { x: 4, y: 5, width: 6, height: 7 },
+        bounds: { x: 8, y: 9, width: 10, height: 11 },
+        boundingBox: { x: 12, y: 13, width: 14, height: 15 }
+      },
+      components: {
+        samples: [
+          {
+            type: 'button',
+            text: 'Buy',
+            rect: { x: 1, y: 2, width: 3, height: 4 },
+            boundingBox: { x: 5, y: 6, width: 7, height: 8 },
+            bounds: { x: 9, y: 10, width: 11, height: 12 }
+          }
+        ]
+      },
       ux: { textSamples: ['Buy now'] },
       assets: { urls: [] },
       evidence: { truncation: { resourceUrls: 7, textSamples: 6, componentSamples: 5, cssRules: 4, executeScriptResult: 3 } },
@@ -575,7 +667,12 @@ test('uses profiler truncation evidence and strips component rect metadata when 
     executeScriptResult: 3
   })
   assert.equal(profile.evidence.rawCounts.cssRules, 4)
-  assert.equal(JSON.stringify(profile.componentProfile).includes('"rect"'), false)
+  const serialized = JSON.stringify({
+    visualProfile: profile.visualProfile,
+    layoutProfile: profile.layoutProfile,
+    componentProfile: profile.componentProfile
+  })
+  assert.doesNotMatch(serialized, /"rect"|"bounds"|"boundingBox"/)
   assert.ok(profile.limitations.includes('resource_urls_truncated'))
   assert.ok(profile.limitations.includes('text_samples_truncated'))
   assert.ok(profile.limitations.includes('component_samples_truncated'))
