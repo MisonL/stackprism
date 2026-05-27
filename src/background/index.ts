@@ -21,6 +21,7 @@ registerMessageRouter()
 refreshAllBadges().catch(() => {})
 
 chrome.runtime.onInstalled.addListener(() => {
+  clearLegacySessionKeys().catch(() => {})
   injectContentObserverIntoOpenTabs()
 })
 

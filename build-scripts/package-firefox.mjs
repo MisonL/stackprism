@@ -75,10 +75,10 @@ const version = manifest.version
 const xpiName = `stackprism-v${version}.xpi`
 const xpiPath = resolve(releaseDir, xpiName)
 
-await new Promise((resolve, reject) => {
+await new Promise((ok, reject) => {
   const output = createWriteStream(xpiPath)
   const archive = archiver('zip', { zlib: { level: 9 } })
-  output.on('close', resolve)
+  output.on('close', ok)
   archive.on('error', reject)
   archive.pipe(output)
   archive.glob('**', { cwd: firefoxDir, dot: true })
