@@ -65,6 +65,17 @@
           "selectors": ["astro-island", "astro-slot"]
         },
         {
+          "name": "Flutter",
+          "url": "https://flutter.dev",
+          "confidence": "高",
+          "patterns": [
+            "(?:^|/)(?:main\\.dart\\.js|flutter\\.js|flutter_bootstrap\\.js)(?:[?#]|$)",
+            "<meta[^>]+name=[\"']generator[\"'][^>]+content=[\"']Flutter[\"']",
+            "<flutter-view\\b"
+          ],
+          "selectors": ["flutter-view"]
+        },
+        {
           "name": "Ember.js",
           "confidence": "中",
           "patterns": ["ember(?:\\.min)?\\.js"],

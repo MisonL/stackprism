@@ -12012,6 +12012,24 @@
         {
           "name": "Genesis Portfolio Pro",
           "patterns": ["wp-content/plugins/genesis-portfolio-pro(?:/|[?#]|$)"]
+        },
+        {
+          "defaults": {
+            "matchType": "keyword",
+            "matchIn": ["html"],
+            "resourceOnly": false,
+            "resourceHints": []
+          },
+          "rules": [
+            {
+              "name": "Redis Object Cache",
+              "patterns": ["<!-- Performance optimized by Redis Object Cache"]
+            },
+            {
+              "name": "WP-Optimize",
+              "patterns": ["<!-- Cached by WP-Optimize"]
+            }
+          ]
         }
       ]
     }
