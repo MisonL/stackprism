@@ -78,4 +78,4 @@ Agent Bridge 是面向本机 AI Agent 的可选能力。启用后，本机 Agent
 
 Agent Bridge 使用 passive capture，不会点击页面、提交表单、登录账号或执行破坏性操作。`viewports` 只写入 profile 请求上下文，不是 CDP 移动仿真或真实手机截图。它不会要求您点击插件按钮、复制 JSON 或下载文件，但本版本信任您本机启动的 bridge 进程，不防同机恶意进程或同浏览器 profile 中其他恶意扩展。
 
-如果 StackPrism 安装在非默认浏览器或非默认 profile，本机 Agent 需要设置 `STACKPRISM_BROWSER_OPEN_COMMAND` 指向对应 Chrome 内核浏览器，并通过 `STACKPRISM_BROWSER_OPEN_ARGS_JSON` JSON 字符串数组传入用户 profile 参数；bridge URL 永远由脚本作为最后一个参数追加。未启用时会返回 `AGENT_BRIDGE_DISABLED`，打开到未安装扩展的浏览器或 profile 时通常会返回 `EXTENSION_NOT_CONNECTED`，这些都是需要用户处理的配置错误，不应由 Agent 静默重试或降级。
+repo-local skill 脚本路径以仓库根目录为基准，Agent 从其他目录启动时应先切到 `<repo-root>` 或使用绝对脚本路径。如果 StackPrism 安装在非默认浏览器或非默认 profile，本机 Agent 需要设置 `STACKPRISM_BROWSER_OPEN_COMMAND` 指向平台 opener 或对应 Chrome 内核浏览器，并通过 `STACKPRISM_BROWSER_OPEN_ARGS_JSON` JSON 字符串数组传入 opener/profile 参数；不要把参数拼进 command 字符串，bridge URL 永远由脚本作为最后一个参数追加。macOS 可用 `open` 加 `["-a","Google Chrome"]` 指定 Chrome；Windows 应使用目标浏览器 `.exe` 路径；Linux 可用 `xdg-open` 或 `google-chrome`/`chromium` 可执行文件。未启用时会返回 `AGENT_BRIDGE_DISABLED`，打开到未安装扩展的浏览器或 profile 时通常会返回 `EXTENSION_NOT_CONNECTED`，这些都是需要用户处理的配置错误，不应由 Agent 静默重试或降级。

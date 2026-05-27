@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans for new implementation work. This document now contains archived historical tasks plus the current status matrix; open work is tracked by explicit current-status rows, not unchecked historical checklist syntax.
 
-**Goal:** 构建一个不依赖 MCP、不需要用户手动复制/下载的 StackPrism Agent Bridge：用户安装浏览器插件后，AI Agent 通过 Skill 内 JS/PY 脚本启动本地 HTTP bridge，自动驱动插件采集目标网站的技术、视觉、UI/UX、交互与资源信息，并读取 `stackprism.site_experience_profile.v1`。
+**Goal:** 构建一个不依赖 MCP、不需要用户手动复制/下载的 StackPrism Agent Bridge：用户安装浏览器插件后，AI Agent 通过 Skill 内 JS/PY 脚本启动本地 HTTP bridge，自动驱动插件采集目标网站的技术、视觉、UI/UX、交互与资源信息，并读取包含 `agentGuidance.recreationPlan` 的 `stackprism.site_experience_profile.v1`，用于快速复刻相似网站体验。
 
 **Architecture:** 插件仍是浏览器事实采集器，Skill 只是 Agent 的使用说明和脚本载体。本地 bridge 脚本绑定 `127.0.0.1`，提供 HTTP API 和本地 bridge 页面；插件在该页面注入 content script 完成握手，再由 background 打开/复用目标 tab、运行检测和体验采集脚本，最后通过 bridge content script 同源 POST profile 与状态。Agent 只访问本地 HTTP API，不直接调用扩展内部接口。
 
@@ -14,13 +14,13 @@
 
 - 可用第一版已落地：扩展端 opt-in、bridge tab/session 隔离、capture orchestration、profile transfer、JS bridge、Python fallback、repo-local skill、release hygiene 和主要自动化契约均已实现。
 - 不能按原计划标记为全量完成：原计划仍有外部发布和 live browser gate，不能仅凭本机单元测试或 fixture smoke 关闭全部 gate。
-- 本机已收敛：本轮补齐 profile 语言字段、UX 一阶分类白名单、默认 browser smoke fixture-backed 成功路径、Task 10 状态矩阵，以及开发文档和审计文档的 gate 口径。
+- 本机已收敛：本轮补齐 profile 语言字段、UX 一阶分类白名单、`agentGuidance.recreationPlan` 复刻执行计划、默认 browser smoke fixture-backed 成功路径、Task 10 状态矩阵，以及开发文档和审计文档的 gate 口径。
 - 外部或未触发 gate：Chrome Web Store / Edge Add-ons 更新链路和商店披露、运行中 idle-driven service worker eviction、精确 incognito `INCOGNITO_NOT_SUPPORTED` live 浏览器元数据路径、更广 DNS/private-network 和长时资源压力矩阵仍需保留为未完成边界。
 - 下方 Task 1 到 Task 9 保留为历史实施计划，已从 checkbox 改为 `Historical item:`，不再作为当前完成状态来源；当前状态以本节、Task 10 状态矩阵和 `docs/reviews/CR-AGENT-BRIDGE-*.md` 为准。
 
 ## 总目标
 
-让 AI Agent 在用户已安装 StackPrism 插件的普通 Chrome 内核浏览器中，无需用户复制、下载或点击插件按钮，即可通过本地 HTTP 接口获得目标网站的 Site Experience Profile，用于实现相似视觉效果、UI/UX 体验、交互行为和必要的技术选型参考。
+让 AI Agent 在用户已安装 StackPrism 插件的普通 Chrome 内核浏览器中，无需用户复制、下载或点击插件按钮，即可通过本地 HTTP 接口获得目标网站的 Site Experience Profile。Profile 必须把浏览器可观测事实转成 Agent 可直接执行的复刻计划，用于快速实现相似视觉效果、UI/UX 体验、交互行为和必要的技术选型参考。
 
 ## 明确不做
 
@@ -67,6 +67,7 @@
 7. 插件打开/复用目标 tab，运行现有检测链路和新增体验采集链路。
 8. background 把 profile 通过分片传输交给 bridge content script，由 bridge content script 在 bridge 页面同源上下文重组、校验并 POST 到 `POST /v1/captures/{id}/profile`；第一版不依赖 background 直接跨 origin `fetch` localhost，也不得把最大 8 MB profile 作为单条扩展消息发送。
 9. Agent 读取 `GET /v1/captures/{id}/profile`，按 Skill 指南生成 UI/UX 实现方案。
+10. Agent 优先读取 `agentGuidance.recreationPlan`，把 `implementationOrder`、`designTokens`、`layoutBlueprint`、`componentInventory`、`interactionChecklist`、`uxChecklist`、`assetHints` 和 `verificationChecklist` 映射到目标项目实现与验证步骤。
 
 ## 用户可见门禁
 
@@ -649,6 +650,18 @@ Frame and shadow DOM rule:
 - 完成后用桌面/移动截图、DOM 几何、交互 smoke test 验证。
 - 如果采集结果因上限被截断，必须在 `evidence.truncation` 和 `limitations` 同时说明，Agent 不得把缺失字段理解为目标站点不存在该结构。
 
+`agentGuidance.recreationPlan` 是给复刻任务的结构化执行层，必须只引用已脱敏 profile 内容：
+
+- `objective`: 明确目标是基于浏览器可观测证据复刻相似网站体验，不是复制后端私有实现或用户私密内容。
+- `implementationOrder`: 从技术栈映射、design token、布局蓝图、组件优先级、交互状态到验证的执行顺序。
+- `designTokens`: 从 `visualProfile` 提取颜色、字体、字号、行高、间距、圆角和阴影候选。
+- `layoutBlueprint`: 从 `layoutProfile` 与 `uxProfile` 提取 landmarks、first-viewport summary、内容分组、信息层级、`viewportMode` 和响应式边界说明；不得在 `captureScreenshotMetadata = false` 时额外输出 `aboveFold`、`boundingBoxes`、`boundingBox`、`bounds` 或 `rect` 这类截图/几何元数据字段名。
+- `componentInventory`: 从 `componentProfile.counts` 和 samples 生成组件数量、优先类型、样本数量和是否包含 rect metadata。
+- `interactionChecklist`: 从 passive interaction 证据提取 transition、animation、sticky/fixed、focus/hover hints，并标注第一版不主动点击。
+- `uxChecklist`: 汇总 `pagePurpose`、`primaryUserPath`、`ctaStrategy`、`trustSignals` 和 `frictionPoints`。
+- `assetHints`: 汇总资源域、CDN hint、script/style 数量、image/font hint 和资源 URL 数量；不得复制 signed URL 或敏感 query。
+- `verificationChecklist`: 要求下游实现后做截图构图、DOM 几何、响应式适配、hover/focus/sticky/loading/scroll smoke 和 limitations 复核。
+
 ## 文件结构规划
 
 ### Skill 包
@@ -1217,7 +1230,7 @@ Current status source:
 | Public complex-site smoke                     | Partial local evidence                                           | `public-complex-target` captured `https://www.wikipedia.org/` with non-empty visual/layout/component data, but this environment resolved the hostname to `198.18.0.19`, so the smoke explicitly used `allowPrivateNetworkTarget = true`; it is not proof that default no-private-network policy accepts resolver-rewritten public hostnames.                                    |
 | Bridge API and rate limits                    | Complete locally                                                 | JS and Python tests plus live smoke cover auth scope, create/status/profile/control endpoints, query/create rate limits, busy ordering, terminal DELETE and no silent queue.                                                                                                                                                                                                    |
 | Target URL, DNS and private-network policy    | Complete for current fixtures; broader matrix remains external   | Unit fixtures and smoke cover unsupported protocols, credentialed URL rejection, bridge self-target, private target block, DNS lookup failure, final URL block and browser-observed `targetNetworkAddress` IP-literal validation. Multi-network DNS/private-address matrices remain a live environment gate.                                                                    |
-| Profile schema, privacy and UX fields         | Complete locally                                                 | Current profile includes `target.language` and first-order UX fields: `pagePurpose`, `primaryUserPath`, `informationHierarchy`, `ctaStrategy`, `trustSignals`, `navigationDepth`, `contentGrouping`, `frictionPoints` and bounded `textSamples`; profile builder tests cover redaction and no screenshot payload.                                                               |
+| Profile schema, privacy and UX fields         | Complete locally                                                 | Current profile includes `target.language`, first-order UX fields, and `agentGuidance.recreationPlan` with implementation order, design tokens, layout blueprint, component inventory, interaction/UX/asset checklists and verification checklist; profile builder tests cover redaction, no screenshot payload and recreation-plan output.                                     |
 | Profile transfer and large profile            | Complete locally                                                 | Tests and smoke cover 384 KiB raw chunking, ack/reassembly, sha256 match, missing chunk, ack timeout, hash mismatch, wrong binding, invalid payload and >8 MB rejection.                                                                                                                                                                                                        |
 | Capture lifecycle and cleanup                 | Complete locally except running idle eviction exact live trigger | Tests and smoke cover cancellation, tab closure, target navigation/load failure/load timeout, extension reload, storage-session clear, deadline reconciliation, target cleanup, bridge process shutdown and no fake profile. Running-capture natural service worker idle eviction has only fail-closed cleanup evidence in the current Chrome behavior and remains a live gate. |
 | Incognito                                     | Unit complete; live metadata branch not proven                   | Content client and tab metadata tests cover `INCOGNITO_NOT_SUPPORTED`. Current CDP and `--incognito` live probes fail closed as `EXTENSION_NOT_CONNECTED` without target fetch or fake profile, so exact live metadata rejection remains a browser configuration gate.                                                                                                          |
@@ -1336,7 +1349,7 @@ External gates retained after local completion:
 - 插件能自动采集目标 URL 的现有技术栈信息。
 - 插件能新增采集视觉、布局、组件、交互、UX 和资产摘要。
 - Agent 能读取 `stackprism.site_experience_profile.v1`。
-- profile 对“实现同样视觉效果、UI/UX 体验”有直接指导字段。
+- profile 对“实现同样视觉效果、UI/UX 体验”有直接指导字段，并通过 `agentGuidance.recreationPlan` 输出实现顺序、设计 token、布局蓝图、组件清单、交互/UX/资产清单和验证清单。
 - `experience-profiler` 同时登记在 `build-scripts/build-injected.mjs` 和 `vite.injected.config.ts`，构建产物存在，且默认不作为 web-accessible resource 暴露给网页。
 - 所有失败路径返回结构化错误。
 - Agent 可观察到插件阶段状态、取消结果、bridge tab 关闭和目标 tab 关闭错误，而不是只等待超时。
