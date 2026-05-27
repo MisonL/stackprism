@@ -124,7 +124,8 @@ test('current verification records the latest unit test count', () => {
   assert.doesNotMatch(e2eCurrentVerification, /212 tests passed, 0 failed/)
   assert.doesNotMatch(e2eCurrentVerification, /213 tests passed, 0 failed/)
   assert.doesNotMatch(e2eCurrentVerification, /219 tests passed, 0 failed/)
-  assert.match(e2eCurrentVerification, /222 tests passed, 0 failed/)
+  assert.doesNotMatch(e2eCurrentVerification, /222 tests passed, 0 failed/)
+  assert.match(e2eCurrentVerification, /225 tests passed, 0 failed/)
   assert.doesNotMatch(task10Matrix, /最新 `pnpm run test:unit` 为 180 tests passed/)
   assert.doesNotMatch(task10Matrix, /最新 `pnpm run test:unit` 为 198 tests passed/)
   assert.doesNotMatch(task10Matrix, /最新 `pnpm run test:unit` 为 199 tests passed/)
@@ -141,7 +142,8 @@ test('current verification records the latest unit test count', () => {
   assert.doesNotMatch(task10Matrix, /最新 `pnpm run test:unit` 为 212 tests passed/)
   assert.doesNotMatch(task10Matrix, /最新 `pnpm run test:unit` 为 213 tests passed/)
   assert.doesNotMatch(task10Matrix, /最新 `pnpm run test:unit` 为 219 tests passed/)
-  assert.match(task10Matrix, /最新 `pnpm run test:unit` 为 222 tests passed/)
+  assert.doesNotMatch(task10Matrix, /最新 `pnpm run test:unit` 为 222 tests passed/)
+  assert.match(task10Matrix, /最新 `pnpm run test:unit` 为 225 tests passed/)
 })
 
 test('current reports include fresh lint and typecheck gate evidence', () => {
