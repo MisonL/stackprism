@@ -25,6 +25,8 @@
     "@types/node": "^20.12.7",
     "@vitejs/plugin-vue": "^5.0.4",
     "@vue/eslint-config-typescript": "^14.7.0",
+    "archiver": "^7.0.1",
+    "esbuild": "^0.21.5",
     "eslint": "^10.3.0",
     "eslint-plugin-vue": "^10.9.1",
     "lucide-vue-next": "^1.0.0",
