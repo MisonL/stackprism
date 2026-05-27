@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { CaptureStore } from '../agent-skill/stackprism-site-experience/scripts/bridge/capture-store.mjs'
 import { createBridgeServer } from '../agent-skill/stackprism-site-experience/scripts/bridge/http-server.mjs'
-import { openBrowser } from '../agent-skill/stackprism-site-experience/scripts/bridge/open-browser.mjs'
+import { openBrowser, resolveBrowserOpenCommand } from '../agent-skill/stackprism-site-experience/scripts/bridge/open-browser.mjs'
 import { htmlEscapeScriptJson, isValidId, safeEqual } from '../agent-skill/stackprism-site-experience/scripts/bridge/protocol.mjs'
 import { readJson as readBridgeRequestJson } from '../agent-skill/stackprism-site-experience/scripts/bridge/security.mjs'
 import { normalizeCaptureRequest } from '../agent-skill/stackprism-site-experience/scripts/bridge/url-policy.mjs'
@@ -806,6 +806,30 @@ test('js bridge open-browser helper appends bridge URL as one argv', () => {
   } finally {
     rmSync(tempDir, { recursive: true, force: true })
   }
+})
+
+test('js bridge open-browser helper selects platform default opener without shell parsing', () => {
+  assert.deepEqual(resolveBrowserOpenCommand({}, 'darwin'), { ok: true, command: 'open', args: [] })
+  assert.deepEqual(resolveBrowserOpenCommand({}, 'win32'), {
+    ok: true,
+    command: 'rundll32.exe',
+    args: ['url.dll,FileProtocolHandler']
+  })
+  assert.deepEqual(resolveBrowserOpenCommand({}, 'linux'), { ok: true, command: 'xdg-open', args: [] })
+  assert.deepEqual(
+    resolveBrowserOpenCommand(
+      {
+        STACKPRISM_BROWSER_OPEN_COMMAND: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+        STACKPRISM_BROWSER_OPEN_ARGS_JSON: JSON.stringify(['--profile-directory=Default'])
+      },
+      'darwin'
+    ),
+    {
+      ok: true,
+      command: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      args: ['--profile-directory=Default']
+    }
+  )
 })
 
 test('bridge cli rejects invalid configured port before ready output', async () => {

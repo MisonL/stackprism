@@ -1,11 +1,20 @@
 ---
 name: stackprism-site-experience
-description: Use when an agent needs to collect StackPrism site experience profiles from a user's installed browser extension through the local loopback bridge.
+description: Use when an AI agent needs to recreate or improve a website from a real URL. Captures browser-observed tech stack, UI design, layout, interactions, UX, and assets through StackPrism so the agent can build from evidence.
 ---
 
 # StackPrism Site Experience
 
-Use this skill when you need browser-observed technology, visual, layout, component, interaction, UX, and asset facts from a target website before implementing a similar experience.
+StackPrism helps AI agents recreate websites from real browser evidence: tech stack, UI design, layout, components, interactions, UX, and assets.
+
+Use this skill proactively when the task involves:
+
+- Building or cloning a page, app, component set, landing page, dashboard, or marketing site similar to an existing URL.
+- Reviewing or improving UI/UX by comparing against a live product, competitor, reference site, or production page.
+- Choosing implementation details from evidence: detected technologies, visual tokens, layout density, component patterns, interaction behavior, asset dependencies, and first-order UX structure.
+- Verifying that a target page's browser-observed facts match a design brief, audit claim, or migration requirement.
+
+Do not use this skill for backend-only tasks, generic web search, SEO content extraction, login-protected private data capture, or cases where the user has not installed and enabled StackPrism Agent Bridge.
 
 ## Preconditions
 
@@ -16,15 +25,19 @@ Use this skill when you need browser-observed technology, visual, layout, compon
 
 ## Start The Bridge
 
+All script paths in this skill are repository-relative. Run commands from the StackPrism checkout root, or resolve `agent-skill/...` to an absolute script path before spawning the bridge from another working directory. These scripts are repo-local tools, not global executables.
+
 Prefer the JavaScript bridge:
 
 ```bash
+cd <repo-root>
 node agent-skill/stackprism-site-experience/scripts/stackprism-bridge.mjs
 ```
 
 Use the Python fallback only when Node is unavailable:
 
 ```bash
+cd <repo-root>
 python3 agent-skill/stackprism-site-experience/scripts/stackprism_bridge.py
 ```
 
@@ -36,7 +49,15 @@ The ready line contains `baseUrl`, `healthUrl`, and `apiToken`. Send ordinary lo
 
 Always stop the bridge child process in a `finally` block after the capture finishes or fails. On startup failure, protocol mismatch, or parse failure, terminate the child process and wait for it to exit before reporting the error. If a fixed `STACKPRISM_BRIDGE_PORT` is already occupied, the script exits non-zero with `PORT_IN_USE` on stderr and no ready JSON.
 
-If StackPrism is installed in a non-default browser or browser profile, set `STACKPRISM_BROWSER_OPEN_COMMAND` to that browser executable. Put profile arguments in `STACKPRISM_BROWSER_OPEN_ARGS_JSON` as a JSON string array; the bridge script appends the bridge URL as the final argv item. Do not include the bridge URL in the environment variable.
+If StackPrism is installed in a non-default browser or browser profile, set `STACKPRISM_BROWSER_OPEN_COMMAND` to the platform opener or browser executable, and put only opener/profile arguments in `STACKPRISM_BROWSER_OPEN_ARGS_JSON` as a JSON string array. The bridge script appends the bridge URL as the final argv item. Do not include the bridge URL in the environment variable.
+
+Keep the executable and arguments separate. For example, use `STACKPRISM_BROWSER_OPEN_COMMAND=open` with `STACKPRISM_BROWSER_OPEN_ARGS_JSON='["-a","Google Chrome"]'`, not `STACKPRISM_BROWSER_OPEN_COMMAND='open -a Google Chrome'`.
+
+Platform notes:
+
+- macOS default opener: `open`. To force Chrome, use `STACKPRISM_BROWSER_OPEN_COMMAND=open` and `STACKPRISM_BROWSER_OPEN_ARGS_JSON='["-a","Google Chrome"]'`. To select a Chrome profile, use the Chrome executable as the command and pass profile args, for example `["--profile-directory=Default"]`.
+- Windows default opener: command `rundll32.exe` with the built-in argument `url.dll,FileProtocolHandler`. To force Chrome or Edge, set `STACKPRISM_BROWSER_OPEN_COMMAND` to the full browser `.exe` path and put profile args such as `["--profile-directory=Default"]` in `STACKPRISM_BROWSER_OPEN_ARGS_JSON`.
+- Linux default opener: `xdg-open`. To force Chrome or Chromium, set `STACKPRISM_BROWSER_OPEN_COMMAND` to `google-chrome`, `chromium`, or the absolute executable path, and put profile args such as `["--profile-directory=Default"]` in `STACKPRISM_BROWSER_OPEN_ARGS_JSON`.
 
 ## Capture A Target
 
@@ -74,6 +95,7 @@ Handle user-actionable failures explicitly:
 
 ## Use The Profile
 
+- Start from `agentGuidance.recreationPlan`. Follow its `implementationOrder`, then map `designTokens`, `layoutBlueprint`, `componentInventory`, `interactionChecklist`, `uxChecklist`, and `assetHints` into the target project.
 - Treat `techProfile` as implementation guidance, not a mandate to copy the source site's private stack.
 - Prioritize layout density, visual hierarchy, interaction feedback, and information architecture.
 - Respect `limitations`; missing fields may mean a section was not requested or was truncated.

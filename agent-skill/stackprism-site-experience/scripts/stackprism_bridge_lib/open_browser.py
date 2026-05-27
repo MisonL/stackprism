@@ -20,15 +20,7 @@ def parse_open_config(env=os.environ):
     return True, None, None
 
 
-def open_browser(url, env=os.environ):
-    ok, code, message = parse_open_config(env)
-    if not ok:
-        return False, {"reason": code, "message": message}
-    if any(char in url for char in ("\0", "\n", "\r")):
-        return False, {"reason": "invalid_url"}
-    if env.get("STACKPRISM_BRIDGE_NO_OPEN") == "1":
-        return True, {"skipped": True}
-
+def resolve_browser_open_command(env=os.environ, system=None):
     command = env.get("STACKPRISM_BROWSER_OPEN_COMMAND")
     args = []
     if command:
@@ -39,13 +31,30 @@ def open_browser(url, env=os.environ):
                 return False, {"reason": "invalid_open_args"}
             if not isinstance(args, list) or any(not isinstance(arg, str) for arg in args):
                 return False, {"reason": "invalid_open_args"}
-    elif platform.system() == "Darwin":
+    elif (system or platform.system()) == "Darwin":
         command = "open"
-    elif platform.system() == "Windows":
+    elif (system or platform.system()) == "Windows":
         command = "rundll32.exe"
         args = ["url.dll,FileProtocolHandler"]
     else:
         command = "xdg-open"
+    return True, {"command": command, "args": args}
+
+
+def open_browser(url, env=os.environ):
+    ok, code, message = parse_open_config(env)
+    if not ok:
+        return False, {"reason": code, "message": message}
+    if any(char in url for char in ("\0", "\n", "\r")):
+        return False, {"reason": "invalid_url"}
+    if env.get("STACKPRISM_BRIDGE_NO_OPEN") == "1":
+        return True, {"skipped": True}
+
+    resolved_ok, resolved = resolve_browser_open_command(env)
+    if not resolved_ok:
+        return False, resolved
+    command = resolved["command"]
+    args = resolved["args"]
 
     try:
         completed = subprocess.run([command, *args, url], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)

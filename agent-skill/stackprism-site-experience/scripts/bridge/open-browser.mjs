@@ -18,12 +18,7 @@ export const parseOpenConfig = env => {
   return { ok: true }
 }
 
-export const openBrowser = (url, env = process.env, platform = process.platform) => {
-  const openConfig = parseOpenConfig(env)
-  if (!openConfig.ok) return { ok: false, details: { reason: openConfig.code, message: openConfig.message } }
-
-  if (env.STACKPRISM_BRIDGE_NO_OPEN === '1') return { ok: true, skipped: true }
-
+export const resolveBrowserOpenCommand = (env = process.env, platform = process.platform) => {
   let command = env.STACKPRISM_BROWSER_OPEN_COMMAND
   let args = []
   if (command) {
@@ -45,6 +40,18 @@ export const openBrowser = (url, env = process.env, platform = process.platform)
   } else {
     command = 'xdg-open'
   }
+  return { ok: true, command, args }
+}
+
+export const openBrowser = (url, env = process.env, platform = process.platform) => {
+  const openConfig = parseOpenConfig(env)
+  if (!openConfig.ok) return { ok: false, details: { reason: openConfig.code, message: openConfig.message } }
+
+  if (env.STACKPRISM_BRIDGE_NO_OPEN === '1') return { ok: true, skipped: true }
+
+  const resolved = resolveBrowserOpenCommand(env, platform)
+  if (!resolved.ok) return resolved
+  const { command, args } = resolved
 
   try {
     const child = spawnSync(command, [...args, url], { stdio: 'ignore', shell: false, timeout: 2000 })

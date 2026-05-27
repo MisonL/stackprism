@@ -1,8 +1,7 @@
-name: stackprism-site-experience
-version: 0.1.0
-description: Collect StackPrism site experience profiles through a local loopback bridge.
-entrypoint: SKILL.md
-auto_discovery: false
-notes:
-  - This repo-local metadata file does not install the skill globally.
-  - Run bridge scripts by repository path unless the skill is copied into a global registry.
+interface:
+  display_name: 'StackPrism Site Experience'
+  short_description: 'Evidence for website recreation'
+  brand_color: '#0F766E'
+  default_prompt: 'Use $stackprism-site-experience to inspect this URL and recreate a similar site from observed tech stack, UI, layout, UX, and assets.'
+policy:
+  allow_implicit_invocation: true
