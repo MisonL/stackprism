@@ -3,12 +3,13 @@ import {
   SITE_EXPERIENCE_PROFILE_SCHEMA,
   type AgentBridgeCapabilities,
   type AgentCaptureRequest,
+  type AgentCaptureScreenshot,
   type SiteExperienceProfile
 } from '@/types/agent-bridge'
 import type { PopupRawResult } from '@/types/popup'
 import { buildAgentGuidance } from '@/utils/site-experience-guidance'
 import { buildLimitations } from '@/utils/site-experience-limitations'
-import { cleanInlineText, redactText, redactUrl } from '@/utils/site-experience-redaction'
+import { cleanInlineText, isRecord, redactText, redactUrl } from '@/utils/site-experience-redaction'
 import {
   buildAssetProfile,
   buildComponentProfile,
@@ -31,18 +32,35 @@ export interface BuildSiteExperienceProfileInput {
   finalUrl?: string
   userAgent?: string
   extensionVersion?: string
+  screenshot?: AgentCaptureScreenshot | null
+  limitations?: string[]
   capturedAt?: string
   loginState?: 'unknown' | 'likely_authenticated' | 'likely_public'
   pageSupported?: boolean
 }
 
+const isValidScreenshot = (value: unknown): value is AgentCaptureScreenshot =>
+  isRecord(value) &&
+  typeof value.dataUrl === 'string' &&
+  /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/i.test(value.dataUrl) &&
+  value.mimeType === 'image/jpeg' &&
+  typeof value.byteLength === 'number' &&
+  Number.isInteger(value.byteLength) &&
+  value.byteLength > 0 &&
+  value.source === 'chrome.tabs.captureVisibleTab' &&
+  value.scope === 'visible_viewport' &&
+  typeof value.capturedAt === 'string'
+
 export const buildSiteExperienceProfile = (input: BuildSiteExperienceProfileInput): SiteExperienceProfile => {
   const include = new Set(input.request.include)
   const technologies = include.has('tech') ? (input.raw?.technologies || []).map(sanitizeTechnology) : []
   const assetProfile = include.has('assets') ? buildAssetProfile(input.raw, input.experience, input.request.options.maxResourceUrls) : {}
-  const limitations = buildLimitations(input.request, input.experience)
+  const limitations = [...new Set([...buildLimitations(input.request, input.experience), ...(input.limitations || [])])]
   const techProfile = include.has('tech') ? buildTechProfile(technologies) : {}
   const visualProfile = include.has('visual') ? buildVisualProfile(input.experience, input.request.options.captureScreenshotMetadata) : {}
+  if (include.has('visual') && input.request.options.captureScreenshot && isValidScreenshot(input.screenshot)) {
+    visualProfile.screenshot = input.screenshot
+  }
   const layoutProfile = include.has('layout') ? buildLayoutProfile(input.experience, input.request.options.captureScreenshotMetadata) : {}
   const componentProfile = include.has('components')
     ? buildComponentProfile(input.experience, input.request.options.captureScreenshotMetadata)

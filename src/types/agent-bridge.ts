@@ -11,7 +11,7 @@ export const REQUIRED_AGENT_BRIDGE_CAPABILITIES = [
   'experienceProfiler'
 ] as const
 
-export const AGENT_BRIDGE_CAPABILITIES = [...REQUIRED_AGENT_BRIDGE_CAPABILITIES, 'rawProfile', 'viewportMetadata'] as const
+export const AGENT_BRIDGE_CAPABILITIES = [...REQUIRED_AGENT_BRIDGE_CAPABILITIES, 'rawProfile', 'viewportMetadata', 'visualScreenshot'] as const
 
 export type AgentBridgeCapability = (typeof AGENT_BRIDGE_CAPABILITIES)[number]
 
@@ -128,10 +128,20 @@ export interface AgentCaptureViewport {
 export interface AgentCaptureOptions {
   forceRefresh: boolean
   captureScreenshotMetadata: boolean
+  captureScreenshot?: boolean
   keepTabOpen: boolean
   allowPrivateNetworkTarget: boolean
   targetMode: AgentCaptureTargetMode
   maxResourceUrls: number
+}
+
+export interface AgentCaptureScreenshot {
+  dataUrl: string
+  mimeType: 'image/jpeg'
+  byteLength: number
+  source: 'chrome.tabs.captureVisibleTab'
+  scope: 'visible_viewport'
+  capturedAt: string
 }
 
 export interface AgentCaptureRequest {

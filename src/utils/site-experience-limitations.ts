@@ -8,6 +8,10 @@ export const buildLimitations = (request: AgentCaptureRequest, experience: any):
   for (const item of cleanStringArray(experience?.limitations).map(redactText).map(cleanInlineText).filter(Boolean)) limitations.add(item)
   if (request.viewports.length) limitations.add('viewport_emulation_unsupported')
   if (request.options.captureScreenshotMetadata === false) limitations.add('screenshot_metadata_not_requested')
+  if (request.options.captureScreenshot !== true) limitations.add('screenshot_image_not_requested')
+  if (request.options.captureScreenshot === true && request.include && !request.include.includes('visual')) {
+    limitations.add('screenshot_image_requires_visual_section')
+  }
   if (request.include && !request.include.includes('tech')) limitations.add('tech_section_not_requested')
   if (request.include && !request.include.includes('visual')) limitations.add('visual_section_not_requested')
   if (request.include && !request.include.includes('layout')) limitations.add('layout_section_not_requested')

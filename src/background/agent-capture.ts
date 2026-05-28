@@ -27,6 +27,7 @@ import type { AgentCaptureResponse } from './agent-capture-common'
 import {
   cleanupTarget,
   cleanForCapture,
+  captureVisibleViewportScreenshot,
   executeExperienceProfiler,
   getAgentCaptureUserAgent,
   getExtensionVersion,
@@ -182,12 +183,19 @@ const runCapture = async (state: AgentCaptureState, request: AgentCaptureRequest
     const [settings, data, tab] = await Promise.all([loadDetectorSettings(), getTabData(targetTabId), getTabSnapshot(targetTabId)])
     const raw = shouldRunTech ? await buildPopupRawResult(data, settings, tab) : null
     const capturedAt = new Date().toISOString()
+    const screenshotResult =
+      request.options.captureScreenshot && request.include.includes('visual')
+        ? await captureVisibleViewportScreenshot(targetTabId, state.targetWindowId || state.bridgeWindowId, state.bridgeTabId)
+        : { screenshot: null, limitations: [] }
+    if (!(await shouldContinueCapture(state))) return
     const profile = buildSiteExperienceProfile({
       captureId: state.captureId,
       request,
       raw,
       experience,
       capabilities,
+      screenshot: screenshotResult.screenshot,
+      limitations: screenshotResult.limitations,
       finalUrl,
       userAgent: getAgentCaptureUserAgent(),
       extensionVersion: getExtensionVersion(),

@@ -5,6 +5,7 @@ const VIEWPORT_FIELDS = new Set(['name', 'width', 'height', 'deviceScaleFactor']
 const OPTION_FIELDS = new Set([
   'forceRefresh',
   'captureScreenshotMetadata',
+  'captureScreenshot',
   'keepTabOpen',
   'allowPrivateNetworkTarget',
   'targetMode',
@@ -127,6 +128,7 @@ const isCaptureRequest = (value: any): value is AgentCaptureRequest =>
   ['forceRefresh', 'captureScreenshotMetadata', 'keepTabOpen', 'allowPrivateNetworkTarget'].every(
     key => typeof value.options[key] === 'boolean'
   ) &&
+  (value.options.captureScreenshot === undefined || typeof value.options.captureScreenshot === 'boolean') &&
   ALLOWED_TARGET_MODES.has(value.options.targetMode) &&
   Number.isInteger(value.options.maxResourceUrls) &&
   value.options.maxResourceUrls >= 0 &&

@@ -4,12 +4,16 @@ import { clearBundleLicenseTimer } from './bundle-license'
 import { clearDynamicSnapshotState } from './dynamic-snapshot'
 import { clearBadge, clearTabSession } from './tab-store'
 import type { AgentCaptureRequest } from '@/types/agent-bridge'
-import type { AgentBridgeError } from '@/types/agent-bridge'
+import type { AgentBridgeError, AgentCaptureScreenshot } from '@/types/agent-bridge'
 import { makeAgentCaptureError } from './agent-capture-common'
 import { logBackgroundError } from './logging'
 
 const TARGET_LOAD_TIMEOUT_REPORTING_GRACE_MS = 5000
 const MAX_TARGET_LOAD_WAIT_MS = 60000
+const SCREENSHOT_QUALITY = 72
+const MAX_SCREENSHOT_BYTES = 2 * 1024 * 1024
+const SCREENSHOT_CAPTURE_RETRY_DELAYS_MS = [250, 750, 1500, 2500]
+const TAB_ACTIVATION_RETRY_DELAYS_MS = [0, 150, 500, 1000]
 
 export const cleanForCapture = async (tabId: number): Promise<void> => {
   clearBundleLicenseTimer(tabId)
@@ -132,6 +136,81 @@ export const executeExperienceProfiler = async (
         }
       })
       .catch(() => {})
+  }
+}
+
+type ScreenshotCaptureResult = { screenshot: AgentCaptureScreenshot | null; limitations: string[] }
+
+const dataUrlByteLength = (value: string): number => new TextEncoder().encode(value).byteLength
+const waitForDelay = (delayMs: number): Promise<void> => new Promise(resolve => setTimeout(resolve, delayMs))
+
+const waitForTabActive = async (tabId: number): Promise<boolean> => {
+  for (const delayMs of TAB_ACTIVATION_RETRY_DELAYS_MS) {
+    if (delayMs > 0) await waitForDelay(delayMs)
+    const tab = await chrome.tabs.get(tabId).catch(() => null)
+    if (tab?.active === true) return true
+  }
+  return false
+}
+
+const focusCaptureWindow = async (windowId: number): Promise<void> => {
+  await chrome.windows?.update?.(windowId, { focused: true }).catch(() => {})
+}
+
+const captureVisibleTabDataUrl = async (windowId: number): Promise<string> => {
+  let lastError: unknown = null
+  for (const delayMs of SCREENSHOT_CAPTURE_RETRY_DELAYS_MS) {
+    if (delayMs > 0) await waitForDelay(delayMs)
+    try {
+      return await chrome.tabs.captureVisibleTab(windowId, { format: 'jpeg', quality: SCREENSHOT_QUALITY })
+    } catch (caught) {
+      lastError = caught
+    }
+  }
+  throw lastError
+}
+
+export const captureVisibleViewportScreenshot = async (
+  tabId: number,
+  windowId: number,
+  restoreTabId?: number
+): Promise<ScreenshotCaptureResult> => {
+  if (!chrome.tabs.captureVisibleTab) return { screenshot: null, limitations: ['screenshot_capture_unavailable'] }
+  const activeTabs = await chrome.tabs.query({ active: true, windowId }).catch(() => [])
+  const previousActiveTabId = activeTabs.find(tab => tab.active)?.id ?? activeTabs[0]?.id
+  const tabToRestore = restoreTabId ?? previousActiveTabId
+  try {
+    await focusCaptureWindow(windowId)
+    if (previousActiveTabId !== tabId) await chrome.tabs.update(tabId, { active: true })
+    if (!(await waitForTabActive(tabId))) throw new Error('SCREENSHOT_TARGET_NOT_ACTIVE')
+    const dataUrl = await captureVisibleTabDataUrl(windowId)
+    if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/jpeg;base64,')) {
+      return { screenshot: null, limitations: ['screenshot_capture_invalid'] }
+    }
+    const byteLength = dataUrlByteLength(dataUrl)
+    if (byteLength > MAX_SCREENSHOT_BYTES) {
+      return { screenshot: null, limitations: ['screenshot_image_too_large'] }
+    }
+    return {
+      screenshot: {
+        dataUrl,
+        mimeType: 'image/jpeg',
+        byteLength,
+        source: 'chrome.tabs.captureVisibleTab',
+        scope: 'visible_viewport',
+        capturedAt: new Date().toISOString()
+      },
+      limitations: []
+    }
+  } catch (caught) {
+    logBackgroundError('Agent screenshot capture failed', { tabId, error: caught })
+    return { screenshot: null, limitations: ['screenshot_capture_failed'] }
+  } finally {
+    if (typeof tabToRestore === 'number' && tabToRestore !== tabId) {
+      await chrome.tabs.update(tabToRestore, { active: true }).catch(caught =>
+        logBackgroundError('Agent screenshot tab restore failed', { tabId: tabToRestore, error: caught })
+      )
+    }
   }
 }
 
