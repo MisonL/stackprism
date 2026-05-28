@@ -16,6 +16,7 @@ const viewportKeys = ['name', 'width', 'height', 'deviceScaleFactor']
 const optionKeys = [
   'forceRefresh',
   'captureScreenshotMetadata',
+  'captureScreenshot',
   'keepTabOpen',
   'allowPrivateNetworkTarget',
   'targetMode',
@@ -73,6 +74,7 @@ const validateOptions = (options: AgentCaptureOptions & Record<string, unknown>)
   Boolean(options) &&
   hasOnlyKeys(options, optionKeys) &&
   booleanOptionKeys.every(key => typeof options[key] === 'boolean') &&
+  (options.captureScreenshot === undefined || typeof options.captureScreenshot === 'boolean') &&
   allowedTargetModes.has(options.targetMode) &&
   Number.isInteger(options.maxResourceUrls) &&
   options.maxResourceUrls >= 0 &&
@@ -101,5 +103,13 @@ export const validateAgentCaptureRequest = (
   if (!validateOptions(request.options as AgentCaptureOptions & Record<string, unknown>)) {
     return { ok: false, error: error('INVALID_REQUEST', 'Capture options are invalid.') }
   }
-  return { ok: true, request: { ...request, url, include: includeOrder.filter(item => request.include.includes(item)) } }
+  return {
+    ok: true,
+    request: {
+      ...request,
+      url,
+      include: includeOrder.filter(item => request.include.includes(item)),
+      options: { ...request.options, captureScreenshot: request.options.captureScreenshot === true }
+    }
+  }
 }

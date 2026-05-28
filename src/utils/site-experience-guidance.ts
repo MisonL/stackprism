@@ -26,6 +26,8 @@ const toTextList = (value: unknown, limit: number): string[] => {
 
 const toRecord = (value: unknown): Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value) ? sanitizeRecord(value) : {}
+const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 
 const toCountRecord = (value: unknown): Record<string, number> => {
   const counts: Record<string, number> = {}
@@ -44,6 +46,14 @@ const toTopKeys = (counts: Record<string, number>, limit: number): string[] =>
 
 const valueCount = (value: unknown): number => (Array.isArray(value) ? value.length : 0)
 const GEOMETRY_METADATA_KEYS = new Set(['rect', 'boundingbox', 'bounds'])
+const screenshotSummary = (value: unknown) => {
+  const screenshot = isPlainRecord(value) ? value : {}
+  return {
+    screenshotIncluded: typeof screenshot.dataUrl === 'string' && /^data:image\/jpeg;base64,/i.test(screenshot.dataUrl),
+    screenshotScope: cleanGuidanceText(screenshot.scope),
+    screenshotMimeType: cleanGuidanceText(screenshot.mimeType)
+  }
+}
 
 const hasGeometryMetadata = (value: unknown): boolean => {
   if (Array.isArray(value)) return value.some(hasGeometryMetadata)
@@ -68,7 +78,9 @@ const toDomainHints = (value: unknown, limit: number): string[] => {
 }
 
 const buildRecreationPlan = (sections: GuidanceSections, limitations: string[]) => {
-  const visual = toRecord(sections.visualProfile)
+  const rawVisual = isPlainRecord(sections.visualProfile) ? sections.visualProfile : {}
+  const { screenshot: rawScreenshot, ...visualWithoutScreenshot } = rawVisual
+  const visual = toRecord(visualWithoutScreenshot)
   const layout = toRecord(sections.layoutProfile)
   const components = toRecord(sections.componentProfile)
   const interaction = toRecord(sections.interactionProfile)
@@ -97,6 +109,7 @@ const buildRecreationPlan = (sections: GuidanceSections, limitations: string[]) 
       radii: toTextList(visual.radii, 12),
       shadows: toTextList(visual.shadows, 12)
     },
+    visualReference: screenshotSummary(rawScreenshot),
     layoutBlueprint: {
       landmarks: toTextList(layout.landmarks, 20),
       firstViewportSummary: toRecord(layout.aboveFold),

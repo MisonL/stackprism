@@ -34,7 +34,8 @@ const fullCapabilities = {
   storageSession: true,
   experienceProfiler: true,
   rawProfile: true,
-  viewportMetadata: true
+  viewportMetadata: true,
+  visualScreenshot: true
 }
 
 const makeChrome = () => {
@@ -100,6 +101,19 @@ const makeChrome = () => {
       tabs: {
         query: async () => tabs,
         get: async id => tabs.find(tab => tab.id === id) || { id, windowId: 1, url: '', incognito: false },
+        update: async (id, update) => {
+          const tab = tabs.find(item => item.id === id)
+          if (!tab) throw new Error('TAB_NOT_FOUND')
+          if (update.active === true) {
+            for (const item of tabs) {
+              if (item.windowId === tab.windowId) item.active = item.id === id
+            }
+          } else if (update.active !== undefined) {
+            tab.active = update.active
+          }
+          if (update.url !== undefined) tab.url = update.url
+          return tab
+        },
         create: async create => {
           const tab = { id: 3, windowId: 1, url: create.url, incognito: false, status: 'complete' }
           tabs.push(tab)
@@ -478,6 +492,127 @@ test('agent capture stores no tokens and sends profile chunks through bridge tab
   assert.match(profile.browserContext.capturedAt, /^\d{4}-\d{2}-\d{2}T/)
   assert.equal(env.removedTabs.includes(2), false)
   assert.deepEqual(await listAgentCaptureIds(), [])
+  delete globalThis.chrome
+  restoreFetch()
+})
+
+test('agent capture can attach optional visible viewport screenshot evidence', async () => {
+  const env = makeChrome()
+  const screenshotDataUrl = `data:image/jpeg;base64,${Buffer.from('visible viewport').toString('base64')}`
+  env.tabs[0].active = true
+  env.tabs[1].active = false
+  env.chrome.tabs.captureVisibleTab = async (windowId, options) => {
+    assert.equal(windowId, 1)
+    assert.deepEqual(options, { format: 'jpeg', quality: 72 })
+    assert.equal(env.tabs.find(tab => tab.id === 3).active, true)
+    return screenshotDataUrl
+  }
+  enableBridgeStatusAck(env)
+  enableFastHeaderFallback()
+  globalThis.chrome = env.chrome
+  const [{ registerBridgeSession }, { startAgentCapture, registerAgentProfileTransferPort }] = await Promise.all([
+    loadTsModule('src/background/agent-bridge-session.ts'),
+    loadTsModule('src/background/agent-capture.ts')
+  ])
+  await registerBridgeSession({
+    tabId: 1,
+    windowId: 1,
+    bridgeOrigin: 'http://127.0.0.1:17370',
+    sessionId,
+    captureId,
+    nonce
+  })
+  await connectProfileTransferPort(env, registerAgentProfileTransferPort)
+
+  const response = await startAgentCapture(
+    {
+      type: 'START_AGENT_CAPTURE',
+      captureId,
+      sessionId,
+      nonce,
+      bridgeOrigin: 'http://127.0.0.1:17370',
+      request: {
+        ...baseRequest,
+        options: { ...baseRequest.options, targetMode: 'new_tab', captureScreenshot: true }
+      },
+      capabilities: fullCapabilities
+    },
+    { url: `http://127.0.0.1:17370/bridge?session=${sessionId}&capture=${captureId}&nonce=${nonce}`, tab: { id: 1, windowId: 1 } }
+  )
+
+  assert.equal(response.ok, true)
+  await waitForMessage(env.messages, message => message.type === 'AGENT_PROFILE_TRANSFER_COMPLETE')
+  const profile = decodeTransferredProfile(env.messages)
+  assert.equal(profile.visualProfile.screenshot.dataUrl, screenshotDataUrl)
+  assert.equal(profile.visualProfile.screenshot.mimeType, 'image/jpeg')
+  assert.equal(profile.visualProfile.screenshot.scope, 'visible_viewport')
+  assert.equal(profile.browserContext.extensionCapabilities.visualScreenshot, true)
+  assert.equal(env.tabs.find(tab => tab.id === 1).active, true)
+  delete globalThis.chrome
+  restoreFetch()
+})
+
+test('agent capture stops if capture is cancelled while optional screenshot is pending', async () => {
+  const env = makeChrome()
+  const screenshotDataUrl = `data:image/jpeg;base64,${Buffer.from('late viewport').toString('base64')}`
+  let resolveScreenshot
+  let screenshotStarted = false
+  env.tabs[0].active = true
+  env.tabs[1].active = false
+  env.chrome.tabs.captureVisibleTab = async () => {
+    screenshotStarted = true
+    return new Promise(resolve => {
+      resolveScreenshot = resolve
+    })
+  }
+  enableBridgeStatusAck(env)
+  enableFastHeaderFallback()
+  globalThis.chrome = env.chrome
+  const [{ registerBridgeSession }, { startAgentCapture, cancelAgentCapture, registerAgentProfileTransferPort }, { listAgentCaptureIds }] =
+    await Promise.all([
+      loadTsModule('src/background/agent-bridge-session.ts'),
+      loadTsModule('src/background/agent-capture.ts'),
+      loadTsModule('src/background/agent-capture-state.ts')
+    ])
+  await registerBridgeSession({
+    tabId: 1,
+    windowId: 1,
+    bridgeOrigin: 'http://127.0.0.1:17370',
+    sessionId,
+    captureId,
+    nonce
+  })
+  await connectProfileTransferPort(env, registerAgentProfileTransferPort)
+
+  const response = await startAgentCapture(
+    {
+      type: 'START_AGENT_CAPTURE',
+      captureId,
+      sessionId,
+      nonce,
+      bridgeOrigin: 'http://127.0.0.1:17370',
+      request: {
+        ...baseRequest,
+        options: { ...baseRequest.options, targetMode: 'new_tab', captureScreenshot: true }
+      },
+      capabilities: fullCapabilities
+    },
+    { url: `http://127.0.0.1:17370/bridge?session=${sessionId}&capture=${captureId}&nonce=${nonce}`, tab: { id: 1, windowId: 1 } }
+  )
+
+  assert.equal(response.ok, true)
+  await waitForCondition(() => screenshotStarted)
+  const cancel = await cancelAgentCapture(
+    { type: 'AGENT_CAPTURE_CONTROL', captureId, sessionId, nonce, command: 'cancel' },
+    { url: `http://127.0.0.1:17370/bridge?session=${sessionId}&capture=${captureId}&nonce=${nonce}`, tab: { id: 1, windowId: 1 } }
+  )
+
+  assert.equal(cancel.ok, true)
+  assert.equal((await listAgentCaptureIds()).includes(captureId), false)
+  resolveScreenshot(screenshotDataUrl)
+  await new Promise(resolve => setTimeout(resolve, 50))
+  assert.equal(env.messages.some(message => message.type?.startsWith('AGENT_PROFILE_TRANSFER_')), false)
+  assert.equal((await listAgentCaptureIds()).includes(captureId), false)
   delete globalThis.chrome
   restoreFetch()
 })

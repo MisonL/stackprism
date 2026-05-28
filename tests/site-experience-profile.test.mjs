@@ -94,6 +94,7 @@ test('defines the site experience schema and required capabilities', async () =>
     'storageSession',
     'experienceProfiler'
   ])
+  assert.equal(contract.AGENT_BRIDGE_CAPABILITIES.includes('visualScreenshot'), true)
 })
 
 test('validates all protocol identifiers with fixed ascii contracts', async () => {
@@ -235,6 +236,7 @@ test('builds a redacted site experience profile from raw popup data and experien
       options: {
         forceRefresh: false,
         captureScreenshotMetadata: false,
+        captureScreenshot: false,
         keepTabOpen: false,
         allowPrivateNetworkTarget: false,
         targetMode: 'reuse_or_new_tab',
@@ -332,6 +334,7 @@ test('builds a redacted site experience profile from raw popup data and experien
   assert.equal(profile.layoutProfile.boundingBoxes, undefined)
   assert.ok(profile.limitations.includes('viewport_emulation_unsupported'))
   assert.ok(profile.limitations.includes('screenshot_metadata_not_requested'))
+  assert.ok(profile.limitations.includes('screenshot_image_not_requested'))
   assert.ok(profile.limitations.includes('cross_origin_iframes_limited'))
   assert.ok(profile.limitations.includes('closed_shadow_roots_limited'))
   assert.ok(profile.limitations.includes('stylesheet_access_limited'))
@@ -357,6 +360,7 @@ test('builds a redacted site experience profile from raw popup data and experien
   assert.equal(profile.agentGuidance.recreationPlan.assetHints.resourceUrlCount, 2)
   assert.equal(profile.agentGuidance.recreationPlan.verificationChecklist.length > 0, true)
   assert.deepEqual(profile.visualProfile.colorTokens, ['#123456'])
+  assert.equal(profile.visualProfile.screenshot, undefined)
   assert.doesNotMatch(serialized, /secret|Bearer|user@example\.com|13800138000|1234567890123|￥199|张三|preview=abc|#frag/)
   for (const url of [
     profile.target.url,
@@ -374,6 +378,58 @@ test('builds a redacted site experience profile from raw popup data and experien
     serialized,
     /token=\[redacted\]|signature=\[redacted\]|auth=\[redacted\]|session=\[redacted\]|key=\[redacted\]|preview=\[redacted\]/
   )
+})
+
+test('builds optional screenshot payload only when explicitly requested', async () => {
+  const { buildSiteExperienceProfile } = await loadTsModule('src/utils/site-experience-profile.ts')
+  const profile = buildSiteExperienceProfile({
+    captureId: 'cap_CCCCCCCCCCCCCCCCCCCCCC',
+    request: {
+      url: 'https://example.com/',
+      mode: 'experience',
+      waitMs: 0,
+      include: ['visual'],
+      viewports: [],
+      options: {
+        forceRefresh: false,
+        captureScreenshotMetadata: true,
+        captureScreenshot: true,
+        keepTabOpen: false,
+        allowPrivateNetworkTarget: false,
+        targetMode: 'new_tab',
+        maxResourceUrls: 300
+      },
+      protocolVersion: 1
+    },
+    raw: null,
+    experience: { visual: { colors: ['#101820'] } },
+    screenshot: {
+      dataUrl: `data:image/jpeg;base64,${Buffer.from('shot').toString('base64')}`,
+      mimeType: 'image/jpeg',
+      byteLength: 31,
+      source: 'chrome.tabs.captureVisibleTab',
+      scope: 'visible_viewport',
+      capturedAt: '2026-05-27T00:00:00.000Z'
+    },
+    capabilities: {
+      agentBridge: true,
+      siteExperienceProfileV1: true,
+      profileChunkTransport: true,
+      bridgeContentPost: true,
+      storageSession: true,
+      experienceProfiler: true,
+      rawProfile: false,
+      viewportMetadata: true,
+      visualScreenshot: true
+    },
+    finalUrl: 'https://example.com/'
+  })
+
+  assert.equal(profile.visualProfile.screenshot.mimeType, 'image/jpeg')
+  assert.match(profile.visualProfile.screenshot.dataUrl, /^data:image\/jpeg;base64,/)
+  assert.equal(profile.visualProfile.screenshot.scope, 'visible_viewport')
+  assert.equal(profile.limitations.includes('screenshot_image_not_requested'), false)
+  assert.equal(profile.agentGuidance.recreationPlan.visualReference.screenshotIncluded, true)
 })
 
 test('agent guidance sanitizes external profile labels before composing summary', async () => {
