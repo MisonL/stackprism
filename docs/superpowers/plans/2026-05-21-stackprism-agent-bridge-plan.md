@@ -133,6 +133,7 @@ Capture request validation:
 - `include` 必须是非空数组，元素只能来自 `tech`、`visual`、`layout`、`components`、`interaction`、`ux`、`assets`；重复项按固定顺序归一化。未包含的 profile section 必须返回空对象并在 `limitations` 记录 `section_not_requested`，不得运行对应重型采集后再静默丢弃。
 - `viewports` 第一版最多接受 3 项；每项 `name` 可选，必须是 ASCII 字母、数字、`-`、`_`，长度 `1..32`；`width` 范围 `320..3840`，`height` 范围 `320..2160`，`deviceScaleFactor` 范围 `1..4`。由于第一版不新增 `chrome.windows` 权限，这些值只写入 profile 请求上下文和 limitations，不得宣称真实移动仿真。
 - `options.forceRefresh`、`options.captureScreenshotMetadata`、`options.keepTabOpen`、`options.allowPrivateNetworkTarget` 必须是 boolean；缺省分别为 `false`、`false`、`false`、`false`。
+- `options.captureScreenshot` 是可选 boolean，缺省为 `false`。只有显式为 `true` 且 `include` 包含 `visual` 时，插件才尝试用 `chrome.tabs.captureVisibleTab` 采集当前可见视口 JPEG data URL；失败时必须返回 limitation，不得伪造截图。截图 data URL 只属于本次 bridge 内存 profile，不自动落盘；用户手动下载的截图文件由浏览器下载目录管理，不属于插件自动清理范围。
 - `options.targetMode` 只能是 `"reuse_or_new_tab"`、`"new_tab"` 或 `"active_tab"`；缺省为 `"reuse_or_new_tab"`。
 - `options.maxResourceUrls` 范围 `0..1000`，缺省 `300`。
 - 未定义的顶层字段或 `options` 字段必须返回 `400 INVALID_REQUEST`，不得忽略；未来协议扩展必须通过 `protocolVersion` 或显式 capability 协商。
@@ -170,6 +171,7 @@ Capture request validation:
   "options": {
     "forceRefresh": true,
     "captureScreenshotMetadata": true,
+    "captureScreenshot": false,
     "maxResourceUrls": 300,
     "targetMode": "reuse_or_new_tab",
     "keepTabOpen": false,
@@ -198,7 +200,7 @@ Concurrency policy:
 - `EXTENSION_NOT_CONNECTED` 也覆盖浏览器打开到了错误 Chrome/Edge 用户 profile 的场景。bridge server 不得尝试枚举或判断用户本机浏览器 profile；Skill 文档和 E2E 报告必须提示：如果 StackPrism 安装在非默认浏览器或非默认用户 profile，Agent 必须用 `STACKPRISM_BROWSER_OPEN_COMMAND` 和 `STACKPRISM_BROWSER_OPEN_ARGS_JSON` 精确指定对应浏览器可执行文件和 profile 参数，否则只能从该错误、stderr 脱敏摘要和浏览器可见窗口判断。
 - 非终态 capture 的全局运行上限为 60 秒；超过后 bridge server 必须标记为 `failed`，错误码 `CAPTURE_TIMEOUT`，并让 control endpoint 返回 `cancel`，避免 Agent 永久轮询。
 - `cancel_requested` 超过 10 秒仍未收到插件确认时，bridge server 必须转为 `cancelled`，记录 `details.reason = "cancel_timeout"`，并让插件后续 late status 不得覆盖该终态。
-- `completed` profile 默认只在内存保留 10 分钟；超过 TTL 后 bridge server 必须把 capture 状态转为 `expired`，清除 profile body，并让 `GET /v1/captures/{id}/profile` 返回 `410` 和错误码 `CAPTURE_RESULT_EXPIRED`，避免长期保留采集数据。
+- `completed` profile 默认只在内存保留 10 分钟；超过 TTL 后 bridge server 必须把 capture 状态转为 `expired`，清除 profile body 和其中的 screenshot data URL，并让 `GET /v1/captures/{id}/profile` 返回 `410` 和错误码 `CAPTURE_RESULT_EXPIRED`，避免长期保留采集数据。bridge 进程退出也必须释放全部内存结果。
 
 Target policy:
 
@@ -383,7 +385,7 @@ Bridge content script guard:
 Capability and protocol contract:
 
 - bridge 页面 config 中的 `protocolVersion` 必须等于插件编译时的 `bridgeProtocolVersion`。不匹配时，bridge content script 必须同源 POST `failed` 和 `BRIDGE_PROTOCOL_UNSUPPORTED`，不得向 background 发送 `START_AGENT_CAPTURE`。
-- background 对 `AGENT_BRIDGE_HELLO` 的响应必须包含 `extensionVersion`、`protocolVersion` 和稳定 capabilities 对象：`agentBridge`、`siteExperienceProfileV1`、`profileChunkTransport`、`bridgeContentPost`、`storageSession`、`experienceProfiler`、`rawProfile`、`viewportMetadata`。
+- background 对 `AGENT_BRIDGE_HELLO` 的响应必须包含 `extensionVersion`、`protocolVersion` 和稳定 capabilities 对象：`agentBridge`、`siteExperienceProfileV1`、`profileChunkTransport`、`bridgeContentPost`、`storageSession`、`experienceProfiler`、`rawProfile`、`viewportMetadata`、`visualScreenshot`。
 - 第一版必需 capability 是 `agentBridge`、`siteExperienceProfileV1`、`profileChunkTransport`、`bridgeContentPost`、`storageSession` 和 `experienceProfiler`。任一缺失或为 false 时，capture 必须失败为 `NOT_SUPPORTED`，并在脱敏 `details.missingCapability` 中记录字段名。
 - `chrome.storage.session` 不可用时不得退回普通内存状态；必须显式失败为 `NOT_SUPPORTED`，避免 service worker 重启后丢失 capture 所有权。
 - `chrome.storage.session` 的 access level 必须保持默认 trusted-only，或显式设置为 `TRUSTED_CONTEXTS`；不得调用 `chrome.storage.session.setAccessLevel({ accessLevel: "TRUSTED_AND_UNTRUSTED_CONTEXTS" })`。content script 不得直接读取 `agent-capture-state`、active-tab tracker 或普通 tab cache，只能通过已校验的 runtime message/Port 与 background 交互。
@@ -506,14 +508,14 @@ Persisted extension state:
 - `loginState`: only `unknown`, `likely_authenticated`, `likely_public`; do not expose account data.
 - `viewportMode`: `current_viewport`, `window_size_approximation`, or `unsupported`.
 - `bridgeProtocolVersion`
-- `extensionCapabilities`: copied from `AGENT_BRIDGE_HELLO` response, including `agentBridge`, `siteExperienceProfileV1`, `profileChunkTransport`, `bridgeContentPost`, `storageSession`, `experienceProfiler`, `rawProfile`, `viewportMetadata`.
+- `extensionCapabilities`: copied from `AGENT_BRIDGE_HELLO` response, including `agentBridge`, `siteExperienceProfileV1`, `profileChunkTransport`, `bridgeContentPost`, `storageSession`, `experienceProfiler`, `rawProfile`, `viewportMetadata`, `visualScreenshot`.
 
 Viewport rule:
 
 - 普通 Chrome 扩展不能像 CDP 那样真实模拟移动设备、DPR、触控和 user agent。
 - 第一版 `viewports` 只表示“希望采集的窗口尺寸或当前视口摘要”，不是移动设备仿真。
 - 如果无法安全调整窗口尺寸，插件必须返回 `viewportMode = "current_viewport"` 并在 `limitations` 说明未做移动视口采集。
-- 不输出截图图像；`captureScreenshotMetadata` 仅表示采集视口尺寸、关键元素 bounding box 和 above-fold 摘要。`captureScreenshotMetadata = false` 时不得采集或输出 bounding box / above-fold 细节，只保留基础 viewport 上下文和 limitation。真实 screenshot/pixel diff 另做显式能力，不放第一版。
+- 默认不输出截图图像；`captureScreenshotMetadata` 仅表示采集视口尺寸、关键元素 bounding box 和 above-fold 摘要。`captureScreenshotMetadata = false` 时不得采集或输出 bounding box / above-fold 细节，只保留基础 viewport 上下文和 limitation。`captureScreenshot = true` 是单独显式能力，只输出当前可见视口 JPEG data URL，供支持图像输入的 Agent 可选使用；模型不支持图像输入时必须能忽略该字段。
 - 如果需要调整窗口尺寸，必须记录原窗口尺寸并在采集后恢复；没有 `chrome.windows` 权限时不能假装已调整。
 - 第一版不新增 `chrome.windows` 权限；除非后续任务明确更新 manifest 和隐私文档，否则统一返回 `viewportMode = "current_viewport"`，不尝试调整窗口尺寸。
 
@@ -828,7 +830,7 @@ Frame and shadow DOM rule:
 
 - Historical item: 修改 `package.json` 的 `test:unit` 为 `node --test --test-timeout=60000 tests/*.test.mjs` 或等效超时命令，满足后端/脚本测试 60 秒超时基线，防止 bridge 子进程测试卡死。
 - Historical item: 定义 `AgentCaptureRequest`、`AgentCaptureStatus`、`SiteExperienceProfile`、`AgentBridgeError`。
-- Historical item: 定义 `AgentBridgeCapabilities`，字段固定为 `agentBridge`、`siteExperienceProfileV1`、`profileChunkTransport`、`bridgeContentPost`、`storageSession`、`experienceProfiler`、`rawProfile`、`viewportMetadata`。
+- Historical item: 定义 `AgentBridgeCapabilities`，字段固定为 `agentBridge`、`siteExperienceProfileV1`、`profileChunkTransport`、`bridgeContentPost`、`storageSession`、`experienceProfiler`、`rawProfile`、`viewportMetadata`、`visualScreenshot`。
 - Historical item: 定义 agent bridge message union：`AgentBridgeHelloMessage`、`StartAgentCaptureMessage`、`AgentCaptureStatusMessage`、`AgentCaptureControlMessage`、`AgentProfileTransferBeginMessage`、`AgentProfileTransferChunkMessage`、`AgentProfileTransferCompleteMessage`、`AgentProfileTransferAckMessage`。
 - Historical item: 在 `DetectorSettings` 中增加 `agentBridgeEnabled` 运行时字段，`DEFAULT_SETTINGS` 和 `normalizeSettings` 的缺省值必须为 `false`；测试覆盖旧 sync 设置对象、非法类型和显式 `true` 三种输入，并确认 sync payload 中如果误带 `agentBridgeEnabled: true` 也不会自动开启，因为真实生效来源是 local opt-in。
 - Historical item: 写测试确认 `StartAgentCaptureMessage` 不允许 `bridgeToken` 字段，profile transfer messages 不允许 profile wrapper 字段。
@@ -859,7 +861,7 @@ Frame and shadow DOM rule:
 - Historical item: 对资源 URL 的 hash 和敏感 query 参数做脱敏；profile 不输出完整签名 URL、带 token 的图片/字体/脚本 URL。
 - Historical item: 对 UX 文本摘要执行 email、手机号、长数字 ID、金额和疑似姓名脱敏。
 - Historical item: 对 viewport 输出增加 `viewportMode`，无法多视口采集时显式写入 limitation。
-- Historical item: 对 `captureScreenshotMetadata` 输出增加明确分支：`true` 时只允许输出视口尺寸、关键元素 bounding box 和 above-fold 摘要；`false` 时不输出 bounding box / above-fold 细节，并写测试确认不会误产出截图或像素数据。
+- Historical item: 对 `captureScreenshotMetadata` 输出增加明确分支：`true` 时只允许输出视口尺寸、关键元素 bounding box 和 above-fold 摘要；`false` 时不输出 bounding box / above-fold 细节。截图图像由 `captureScreenshot` 单独控制，默认不输出。
 - Historical item: 对 passive interaction、cross-origin iframe、closed shadow root 和不可访问 stylesheet 写入 limitations。
 - Historical item: 对截断结果写入 `evidence.truncation` 和对应 limitation，至少包含资源 URL、文本摘要、组件样本和 CSS rule 样本的 omitted count。
 - Historical item: profile builder 必须从 agent capture context 接收 `AgentBridgeCapabilities`，并原样写入 `browserContext.extensionCapabilities`；不得在 builder 内重新推断 capability。
@@ -964,7 +966,7 @@ Frame and shadow DOM rule:
 - Historical item: `START_AGENT_CAPTURE` 校验 URL、session/capture/nonce 绑定、include、viewports；background 不接收、不读取、不持久化 `bridgeToken`。
 - Historical item: `START_AGENT_CAPTURE` 二次校验 `agentBridgeEnabled`，避免设置页关闭后已有 bridge tab 继续发起采集；关闭后返回 `AGENT_BRIDGE_DISABLED`，并清理 bridge session。
 - Historical item: `START_AGENT_CAPTURE` payload 必须来自已登记 bridge tab 的 content script；background 必须拒绝含 `bridgeToken`、callback URL 或 profile wrapper 的 payload，返回 `INVALID_REQUEST`。
-- Historical item: `START_AGENT_CAPTURE` 校验 `options.forceRefresh`、`options.captureScreenshotMetadata`、`options.targetMode`、`options.keepTabOpen`、`options.allowPrivateNetworkTarget` 和 `options.maxResourceUrls`；未知字段必须返回 `INVALID_REQUEST`，不能静默忽略。
+- Historical item: `START_AGENT_CAPTURE` 校验 `options.forceRefresh`、`options.captureScreenshotMetadata`、`options.captureScreenshot`、`options.targetMode`、`options.keepTabOpen`、`options.allowPrivateNetworkTarget` 和 `options.maxResourceUrls`；未知字段必须返回 `INVALID_REQUEST`，不能静默忽略。
 - Historical item: capture 开始前检查 `chrome.storage.session` 可用；不可用时返回 `NOT_SUPPORTED` 和 `details.missingCapability = "storageSession"`，不得退回普通内存状态。
 - Historical item: 不得把 `chrome.storage.session` access level 放宽给 content script；若实现显式设置 access level，必须设置为 `TRUSTED_CONTEXTS`。单元测试必须断言没有调用 `setAccessLevel({ accessLevel: "TRUSTED_AND_UNTRUSTED_CONTEXTS" })`，并断言 content script 只能通过 runtime message/Port 访问 agent capture 状态。
 - Historical item: `src/background/active-tab-tracker.ts` 记录每个 window 最近的非 bridge active tab；bridge tab 激活时不能覆盖该记录；记录写入 `chrome.storage.session`，service worker 重启后仍可读取。
@@ -1039,7 +1041,7 @@ Frame and shadow DOM rule:
 - Historical item: 实现 request target 和 path/query 规范化：只接受 origin-form path；拒绝 absolute-form、authority-form、percent-encoded slash/backslash、空 path segment、`..`、重复 query 字段和未知 query 字段；`captureId`、`sessionId`、`nonce` 只接受 Protocol identifier contract 定义的固定 ASCII regex 和长度。
 - Historical item: 拒绝重复或歧义请求头：重复 `Host`、`Authorization`、`Content-Type`、`Content-Length`，非法 `Content-Length`，`Content-Length` 与 `Transfer-Encoding` 同时出现，不以 `chunked` 结尾的 `Transfer-Encoding`，以及非 `identity` 的 `Content-Encoding`。
 - Historical item: 对状态、request、control、profile 和错误响应设置 `Cache-Control: no-store` 与 `X-Content-Type-Options: nosniff`；profile endpoint 额外设置 `Referrer-Policy: no-referrer`。
-- Historical item: 校验 capture request：`url`、`mode`、`waitMs`、`include`、`viewports`、`options.forceRefresh`、`options.captureScreenshotMetadata`、`options.targetMode`、`options.keepTabOpen`、`options.allowPrivateNetworkTarget`、`options.maxResourceUrls` 和未知字段；超出协议范围时返回 `400 INVALID_REQUEST`，不得创建 capture 或打开浏览器。
+- Historical item: 校验 capture request：`url`、`mode`、`waitMs`、`include`、`viewports`、`options.forceRefresh`、`options.captureScreenshotMetadata`、`options.captureScreenshot`、`options.targetMode`、`options.keepTabOpen`、`options.allowPrivateNetworkTarget`、`options.maxResourceUrls` 和未知字段；超出协议范围时返回 `400 INVALID_REQUEST`，不得创建 capture 或打开浏览器。
 - Historical item: 使用安全随机源生成 `apiToken`、`bridgeToken`、`sessionId`、capture `nonce`、`profileTransferId` 和 bridge 页面 CSP nonce；不得使用 `Math.random()`、时间戳或递增计数器生成安全边界值。
 - Historical item: token 校验必须走共享 helper：先做格式和长度检查，再使用固定时间比较或等效安全比较；失败路径只返回统一 `UNAUTHORIZED`/`FORBIDDEN`，不得在错误或日志中区分“前缀正确但后缀错误”等可被枚举的信息。
 - Historical item: `/bridge` URL 不包含 API token；HTML 内嵌一次性 `bridgeToken`，并设置 no-store、no-referrer、nosniff、`X-Frame-Options: DENY`、`Cross-Origin-Opener-Policy: same-origin`、`Permissions-Policy` 和不含 `unsafe-inline`、包含 `script-src 'nonce-{cspNonce}'`、`style-src 'nonce-{cspNonce}'`、`connect-src 'self'`、`frame-ancestors 'none'` 的 CSP。
@@ -1230,7 +1232,7 @@ Current status source:
 | Public complex-site smoke                     | Partial local evidence                                           | `public-complex-target` captured `https://www.wikipedia.org/` with non-empty visual/layout/component data, but this environment resolved the hostname to `198.18.0.19`, so the smoke explicitly used `allowPrivateNetworkTarget = true`; it is not proof that default no-private-network policy accepts resolver-rewritten public hostnames.                                    |
 | Bridge API and rate limits                    | Complete locally                                                 | JS and Python tests plus live smoke cover auth scope, create/status/profile/control endpoints, query/create rate limits, busy ordering, terminal DELETE and no silent queue.                                                                                                                                                                                                    |
 | Target URL, DNS and private-network policy    | Complete for current fixtures; broader matrix remains external   | Unit fixtures and smoke cover unsupported protocols, credentialed URL rejection, bridge self-target, private target block, DNS lookup failure, final URL block and browser-observed `targetNetworkAddress` IP-literal validation. Multi-network DNS/private-address matrices remain a live environment gate.                                                                    |
-| Profile schema, privacy and UX fields         | Complete locally                                                 | Current profile includes `target.language`, first-order UX fields, and `agentGuidance.recreationPlan` with implementation order, design tokens, layout blueprint, component inventory, interaction/UX/asset checklists and verification checklist; profile builder tests cover redaction, no screenshot payload and recreation-plan output.                                     |
+| Profile schema, privacy and UX fields         | Complete locally                                                 | Current profile includes `target.language`, first-order UX fields, optional `visualProfile.screenshot` only when `captureScreenshot = true`, and `agentGuidance.recreationPlan` with implementation order, design tokens, layout blueprint, component inventory, interaction/UX/asset checklists and verification checklist; tests cover redaction, default no screenshot payload, explicit screenshot payload and recreation-plan output. |
 | Profile transfer and large profile            | Complete locally                                                 | Tests and smoke cover 384 KiB raw chunking, ack/reassembly, sha256 match, missing chunk, ack timeout, hash mismatch, wrong binding, invalid payload and >8 MB rejection.                                                                                                                                                                                                        |
 | Capture lifecycle and cleanup                 | Complete locally except running idle eviction exact live trigger | Tests and smoke cover cancellation, tab closure, target navigation/load failure/load timeout, extension reload, storage-session clear, deadline reconciliation, target cleanup, bridge process shutdown and no fake profile. Running-capture natural service worker idle eviction has only fail-closed cleanup evidence in the current Chrome behavior and remains a live gate. |
 | Incognito                                     | Unit complete; live metadata branch not proven                   | Content client and tab metadata tests cover `INCOGNITO_NOT_SUPPORTED`. Current CDP and `--incognito` live probes fail closed as `EXTENSION_NOT_CONNECTED` without target fetch or fake profile, so exact live metadata rejection remains a browser configuration gate.                                                                                                          |
@@ -1268,7 +1270,7 @@ Manual bridge capture example:
 curl --max-time 60 -sS -X POST "${STACKPRISM_BRIDGE_BASE_URL}/v1/captures" \
   -H 'content-type: application/json' \
   -H "authorization: Bearer ${STACKPRISM_BRIDGE_TOKEN}" \
-  -d '{"url":"http://127.0.0.1:<fixture-port>/site-experience-fixture.html","mode":"experience","waitMs":1000,"include":["tech","visual","layout","components","interaction","ux","assets"],"options":{"allowPrivateNetworkTarget":true,"captureScreenshotMetadata":false}}'
+  -d '{"url":"http://127.0.0.1:<fixture-port>/site-experience-fixture.html","mode":"experience","waitMs":1000,"include":["tech","visual","layout","components","interaction","ux","assets"],"options":{"allowPrivateNetworkTarget":true,"captureScreenshotMetadata":false,"captureScreenshot":false}}'
 ```
 
 Use a real public URL only as an explicit external-target scenario. In the current local environment, `example.com` and some public hostnames can resolve to `198.18.*`; when that happens, the default private-network policy must fail closed unless `allowPrivateNetworkTarget` is explicitly set for an approved local or DNS-proxy test.
@@ -1358,7 +1360,7 @@ External gates retained after local completion:
 - running capture 全局超时、cancel 超时、DNS lookup failure、目标导航走偏和注入失败都有明确结构化错误或终态。
 - target main-frame load failure 返回 `TARGET_LOAD_FAILED`，不会把浏览器错误页当目标页面采集。
 - `include` 子集请求不会运行未请求采集，未请求 section 以空对象和 `section_not_requested` limitation 表达。
-- `captureScreenshotMetadata` 的 true/false 行为可验证：第一版只允许截图元数据，不输出截图图像或像素数据。
+- `captureScreenshotMetadata` 的 true/false 行为可验证：metadata 只控制几何和 above-fold 摘要。截图图像只能通过显式 `captureScreenshot = true` 输出，默认请求不得包含截图图像或像素数据。
 - 单元测试、lint、build、docs build 通过。
 - 浏览器端 smoke test 证明插件、bridge、Agent API 三段联通。
 - bridge 页面不会污染普通检测缓存或 badge。
