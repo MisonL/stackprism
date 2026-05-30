@@ -21,6 +21,7 @@ export interface DetectorSettings {
   customRules: CustomRule[]
   customCss: string
   agentBridgeEnabled: boolean
+  agentBridgeAllowAllNetworkTargets: boolean
 }
 
 export const ALLOWED_CONFIDENCES: readonly Confidence[] = ['高', '中', '低']
@@ -46,5 +47,6 @@ export const DEFAULT_SETTINGS: DetectorSettings = {
   disabledTechnologies: [],
   customRules: [],
   customCss: '',
-  agentBridgeEnabled: false
+  agentBridgeEnabled: false,
+  agentBridgeAllowAllNetworkTargets: false
 }

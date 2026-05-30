@@ -16,6 +16,8 @@ Agent Bridge 让本机 AI Agent 在用户已安装并显式启用 StackPrism 扩
 
 `agentBridgeEnabled` 是本机浏览器 profile 级 opt-in，只从 `chrome.storage.local` 生效。即使旧 `chrome.storage.sync` 中存在同名字段，也不得自动开启 Agent Bridge。
 
+`agentBridgeAllowAllNetworkTargets` 是同样只存在当前浏览器 profile 的高风险开关，默认关闭。用户在设置页保存开启时必须人工确认；开启后，扩展侧会允许 Agent Bridge 继续采集本机、私网、保留地址以及 DNS/proxy 映射到私网的目标。该开关不放开 `http:` / `https:` 之外的协议、不允许采集当前 bridge server 自身，也不改变本地 bridge 进程的创建阶段策略；repo-local helper 仍需显式传入 `--allow-private-network` 或 request option 才会在创建阶段接受私网目标。
+
 发布到 Chrome Web Store 或 Edge Add-ons 前，默认值必须保持 `false`，除非维护者完成隐私披露、用户文档和发布说明更新。
 
 发布前 disclosure 必须覆盖：
@@ -32,6 +34,7 @@ Agent Bridge 让本机 AI Agent 在用户已安装并显式启用 StackPrism 扩
 - DOM 中的 `bridgeToken` 不是对同浏览器 profile 中其他扩展保密的秘密。
 - 默认不采集 cookie、Authorization、localStorage/sessionStorage 明文、完整敏感 query 或页面全文。
 - Agent Bridge 不是浏览器级 SSRF 防火墙。private-network 校验用于拒绝创建 capture、停止采集和阻止 profile 交付，不保证导航前零网络触达。
+- “允许所有网络目标”只应在用户确认本机 Agent、bridge 进程和当前浏览器 profile 可信时短时开启；开启后 private-network fail-closed 保护不再作为扩展侧二次门禁生效。
 
 ## 本地脚本
 
@@ -94,6 +97,8 @@ Agent Bridge 输出 schema 为 `stackprism.site_experience_profile.v1`。当前 
 - `agentGuidance`: 给下游 Agent 的实现建议。当前包含摘要、优先级、注意事项和 `recreationPlan`。`recreationPlan` 把 profile 转成复刻执行层：`implementationOrder`、`designTokens`、`layoutBlueprint`、`componentInventory`、`interactionChecklist`、`uxChecklist`、`assetHints` 和 `verificationChecklist`。这些字段只引用已脱敏的 profile 内容，不能把缺失字段理解为目标站点不存在对应结构。
 
 下游 Agent 不得把 profile 当作页面完整拷贝。它是浏览器可观察事实和实现参考，不是后端私有实现或用户账号内容。截图像素只在 `captureScreenshot = true` 时显式输出，属于未做逐像素脱敏的可选视觉证据，不应用于登录态或私密页面。截图以 data URL 存在于本次 bridge 内存 profile 中，不自动写入磁盘；completed profile 10 分钟 TTL 到期或 bridge 进程退出后会清除。用户在 bridge 页面手动下载的截图文件由浏览器下载目录管理，插件不会自动删除该文件。
+
+完成采集后，本地 bridge 页面会展示受限结果工作台：目标网址、截图预览、截图放大预览、下载截图、复制截图、复制 Markdown 摘要和分组 profile 内容卡片。该页面只能用 `bridgeToken` 读取 `GET /v1/captures/{id}` 的 status preview；preview 中的 `copyText` 和 `contentSummary` 由 bridge server 从已完成 profile 生成，并会脱敏 URL query、token-like id、email、手机号和 token 字段。页面不得使用 `bridgeToken` 读取 raw `/profile`，不得把 raw profile、截图 data URL、`apiToken`、`bridgeToken`、nonce 或完整敏感文本放进“一键复制全部信息”。复制截图依赖浏览器 Clipboard API，失败时必须显示错误，不得伪装成功。复制到剪切板或用户下载后的截图由浏览器/操作系统管理，不属于 StackPrism 自动清理范围。
 
 ## Browser Smoke 场景
 

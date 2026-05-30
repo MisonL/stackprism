@@ -46,6 +46,9 @@ export const resolveBrowserOpenCommand = (env = process.env, platform = process.
 export const openBrowser = (url, env = process.env, platform = process.platform) => {
   const openConfig = parseOpenConfig(env)
   if (!openConfig.ok) return { ok: false, details: { reason: openConfig.code, message: openConfig.message } }
+  if (String(url).includes('\0') || String(url).includes('\n') || String(url).includes('\r')) {
+    return { ok: false, details: { reason: 'invalid_url' } }
+  }
 
   if (env.STACKPRISM_BRIDGE_NO_OPEN === '1') return { ok: true, skipped: true }
 

@@ -22,12 +22,40 @@ Do not use this skill for backend-only tasks, generic web search, SEO content ex
 - StackPrism Agent Bridge is enabled in the extension settings for that local browser profile.
 - The target URL is `http:` or `https:`.
 - Local development targets require `"allowPrivateNetworkTarget": true`.
+- If the user has enabled the extension's high-risk "allow all network targets" setting, still pass `--allow-private-network` for local or DNS-proxy targets; the extension setting affects the browser-observed final target gate, while the helper's create-stage URL policy remains explicit per capture.
 
-## Start The Bridge
+## Preferred Capture Command
 
-All script paths in this skill are repository-relative. Run commands from the StackPrism checkout root, or resolve `agent-skill/...` to an absolute script path before spawning the bridge from another working directory. These scripts are repo-local tools, not global executables.
+Use the capture helper first. It keeps the bridge child process alive, creates one fresh bridge per capture, polls the profile endpoint, and can decode the optional screenshot:
 
-Prefer the JavaScript bridge:
+```bash
+cd <repo-root>
+node agent-skill/stackprism-site-experience/scripts/capture-site.mjs \
+  --url https://target.example \
+  --out /tmp/stackprism-profile.json \
+  --result-out /tmp/stackprism-result.json \
+  --screenshot-out /tmp/stackprism-screenshot.jpg
+```
+
+Set `STACKPRISM_BROWSER_OPEN_COMMAND` and `STACKPRISM_BROWSER_OPEN_ARGS_JSON` only when the default opener is not the browser/profile with StackPrism installed. On macOS, for example, use `STACKPRISM_BROWSER_OPEN_COMMAND=open` and `STACKPRISM_BROWSER_OPEN_ARGS_JSON='["-a","Google Chrome"]'` to force Chrome.
+
+The helper prints one JSON summary on stdout. `screenshotPresent` means the profile contains screenshot evidence; `screenshotWritten` means the optional `--screenshot-out` file was actually written and can be opened by image-capable coding tools.
+
+Each bridge API request has a bounded timeout. The default is 30000 ms; use `--request-timeout-ms <ms>` only when a slower local browser opener or debug bridge needs more time. If it exits with `BRIDGE_REQUEST_TIMEOUT`, stop that attempt and start one fresh helper process rather than reusing a partial capture.
+
+The opened bridge page is also a local result workbench. After completion it shows the target URL, screenshot preview, click-to-enlarge preview, screenshot download/copy buttons, a one-click Markdown summary, and grouped profile content cards. That page only uses the bridge-token status preview; it cannot read raw `/profile`. For programmatic use, prefer the helper output or the API-token profile endpoint.
+
+If the helper exits with `PRIVATE_NETWORK_TARGET_BLOCKED` in a known DNS-proxy or local-development environment, run a second fresh helper process with `--allow-private-network` and record that this was a controlled override. Do not reuse the first bridge URL, capture id, session, or token.
+
+If the helper exits with `CAPTURE_BUSY`, wait a few seconds, stop any bridge child process from that attempt, and run one fresh helper process. Do not keep polling an old capture after a terminal or stale status.
+
+When wrapping retries in shell scripts, avoid reserved or readonly shell variable names such as `status` in zsh. Use names like `capture_status` instead so a successful helper run is not masked by wrapper errors.
+
+## Advanced Bridge API
+
+All script paths in this skill are repository-relative. Run commands from the StackPrism checkout root, or resolve `agent-skill/...` to an absolute script path before spawning the bridge from another working directory. These scripts are repo-local tools, not global executables. Use the manual bridge API only when you need protocol-level debugging or custom orchestration beyond the capture helper.
+
+For advanced use, prefer the JavaScript bridge:
 
 ```bash
 cd <repo-root>
@@ -86,7 +114,7 @@ Use the real target URL for the task. Do not treat `https://example.com` as the 
 
 Then poll `GET /v1/captures/{id}` and read `GET /v1/captures/{id}/profile` when status is `completed`.
 
-If the consuming model can read images, set `"captureScreenshot": true` with `include` containing `"visual"`. The profile will include `visualProfile.screenshot.dataUrl` when Chrome can capture the visible target viewport. This can briefly activate the target tab before returning to the bridge page. Treat it as optional evidence; models without image input should ignore it. The screenshot is kept in the bridge's in-memory profile and is cleared when the completed profile TTL expires or the bridge process exits. A user-downloaded screenshot file is managed by the browser download location and is not auto-deleted by StackPrism. The screenshot is not text-redacted pixel by pixel, so do not request it for login-protected or private user pages.
+If the consuming model can read images, set `"captureScreenshot": true` with `include` containing `"visual"`. The profile will include `visualProfile.screenshot.dataUrl` when Chrome can capture the visible target viewport. This can briefly activate the target tab before returning to the bridge page. Treat it as optional evidence; models without image input should ignore it. The screenshot is kept in the bridge's in-memory profile and is cleared when the completed profile TTL expires or the bridge process exits. A user-downloaded or clipboard-copied screenshot is managed by the browser or operating system and is not auto-deleted by StackPrism. The screenshot is not text-redacted pixel by pixel, so do not request it for login-protected or private user pages.
 
 Large pages can produce multi-chunk profile transfers. If the browser extension reports `BRIDGE_TRANSPORT_DISCONNECTED`, `PROFILE_TRANSPORT_FAILED`, `PROFILE_CHUNK_MISSING`, or `CAPTURE_TIMEOUT`, treat the capture as failed, stop the bridge child process, start a new bridge, and retry once with a smaller `include` set or lower `maxResourceUrls`. Do not synthesize a profile from partial chunks.
 

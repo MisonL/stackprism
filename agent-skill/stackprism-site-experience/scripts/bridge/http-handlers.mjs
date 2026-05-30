@@ -1,5 +1,6 @@
 import { fail, htmlEscapeScriptJson, isKnownBridgeErrorCode, json, newCspNonce, protocolVersion, redactUrl, safeEqual } from './protocol.mjs'
 import { renderBridgePageHtml } from './bridge-page.mjs'
+import { profilePreviewSummary } from './profile-summary.mjs'
 
 export const finalStates = new Set(['completed', 'failed', 'cancelled', 'expired'])
 
@@ -60,6 +61,8 @@ const previewForCapture = capture => {
   if (targetUrl) preview.targetUrl = targetUrl
   const screenshot = capture.status === 'completed' ? screenshotPreview(capture) : null
   if (screenshot) preview.screenshot = screenshot
+  const summary = profilePreviewSummary(capture, screenshot)
+  if (summary) Object.assign(preview, summary)
   return Object.keys(preview).length ? preview : undefined
 }
 
@@ -161,6 +164,7 @@ export const renderBridge = (res, capture) => {
     sessionId: capture.sessionId,
     nonce: capture.nonce,
     bridgeToken: capture.bridgeToken,
+    targetUrl: redactUrl(capture.request?.url),
     protocolVersion
   })
   res.writeHead(200, {

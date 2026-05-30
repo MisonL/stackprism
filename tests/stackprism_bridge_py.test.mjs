@@ -523,7 +523,12 @@ print(json.dumps(results, sort_keys=True))
 
 test('python fallback open-browser helper validates env and URL before spawning', () => {
   const parsed = pythonOneShot(`
+import subprocess
+import stackprism_bridge_lib.open_browser as open_browser_module
 from stackprism_bridge_lib.open_browser import open_browser
+
+def timeout_run(*args, **kwargs):
+    raise subprocess.TimeoutExpired(args[0], kwargs.get("timeout"))
 
 checks = {
     "nul_env": open_browser("http://127.0.0.1:1/bridge", {"STACKPRISM_BROWSER_OPEN_COMMAND": "bad\\0cmd"}),
@@ -534,12 +539,15 @@ checks = {
     "invalid_url": open_browser("http://127.0.0.1:1/bridge\\nnext", {"STACKPRISM_BRIDGE_NO_OPEN": "1"}),
     "missing_command": open_browser("http://127.0.0.1:1/bridge", {"STACKPRISM_BROWSER_OPEN_COMMAND": "/definitely/missing/stackprism-browser"}),
 }
+open_browser_module.subprocess.run = timeout_run
+checks["open_timeout"] = open_browser("http://127.0.0.1:1/bridge", {"STACKPRISM_BROWSER_OPEN_COMMAND": "python3"})
 print(json.dumps({name: result for name, result in checks.items()}, sort_keys=True))
 `)
   assert.deepEqual(parsed.nul_env, [false, { reason: 'BRIDGE_INVALID_ENV', message: 'Browser open environment contains NUL.' }])
   assert.deepEqual(parsed.nul_json_args, [false, { reason: 'BRIDGE_INVALID_ENV', message: 'Browser open environment contains NUL.' }])
   assert.deepEqual(parsed.invalid_url, [false, { reason: 'invalid_url' }])
   assert.deepEqual(parsed.missing_command, [false, { reason: 'command_not_found' }])
+  assert.deepEqual(parsed.open_timeout, [false, { reason: 'open_timeout' }])
 })
 
 test('python fallback open-browser helper appends bridge URL as one argv', () => {
@@ -611,28 +619,74 @@ test('python fallback bridge page has CSP nonce and script-safe config', async (
     assert.match(csp, new RegExp(`style-src 'nonce-${cspNonce}'`))
     assert.equal(response.headers.get('x-frame-options'), 'DENY')
     assert.match(html, /meta name="stackprism-agent-bridge" content="1"/)
-    assert.match(html, /class="bridge-card"/)
+    assert.match(html, /id="bridgeCard" class="bridge-card" data-status="waiting_extension" aria-labelledby="bridge-title" tabindex="-1"/)
     assert.match(html, /id="progressBar"/)
     assert.match(html, /id="targetUrl"/)
     assert.match(html, /id="targetScreenshot"/)
+    assert.match(html, /id="targetScreenshot" alt=""/)
+    assert.match(html, /id="screenshotMeta"/)
     assert.match(html, /id="screenshotDownload"/)
+    assert.match(html, /id="copyScreenshot"/)
+    assert.match(html, /id="copyAllInfo"/)
+    assert.match(html, /id="copyStatus"/)
+    assert.match(html, /id="modalCopyStatus"/)
+    assert.match(html, /id="stepSummary" class="step-summary" role="status" aria-live="polite"/)
+    assert.match(html, /<ol class="steps" aria-label="采集步骤" role="list">/)
+    assert.match(html, /data-phase="bridge_connected" aria-current="step"/)
+    assert.match(html, /id="profileContentSection"/)
+    assert.match(html, /id="profileContentGrid"/)
     assert.match(html, /id="screenshotModal"/)
     assert.match(html, /id="modalDownload"/)
+    assert.match(html, /id="modalCopyScreenshot"/)
     assert.match(html, /id="modalClose"/)
+    assert.match(html, /id="modalScreenshot" class="modal-image" alt=""/)
     assert.match(html, /addEventListener\('click',openScreenshot\)/)
+    assert.match(html, /navigator\.clipboard\.writeText/)
+    assert.match(html, /new ClipboardItem/)
+    assert.match(html, /showCopyStatus\('已复制全部信息。'\)/)
+    assert.match(html, /const clipboardScreenshotBlob=async/)
+    assert.match(html, /createImageBitmap\(blob\)/)
+    assert.match(html, /'image\/png':blob/)
+    assert.match(html, /复制截图失败：浏览器未允许写入剪切板，或截图格式无法转换。/)
+    assert.match(html, /截图预览无法加载/)
     assert.match(html, /download=screenshotFilename\(\)/)
+    assert.match(html, /button:not\(:disabled\),a\[href\],input:not\(:disabled\),select:not\(:disabled\),textarea:not\(:disabled\),\[tabindex\]:not\(\[tabindex="-1"\]\)/)
     assert.match(html, /currentScreenshot\?\.mimeType==='image\/png'\?'png'/)
     assert.match(html, /currentScreenshot\?\.mimeType==='image\/webp'\?'webp'/)
+    assert.match(html, /el\.targetScreenshot\.src!==currentScreenshot\.dataUrl/)
+    assert.match(html, /el\.targetScreenshot\.alt='目标页面截图预览'/)
+    assert.match(html, /el\.targetScreenshot\.alt=''/)
+    assert.match(html, /color-scheme:light dark/)
+    assert.match(html, /@media \(prefers-color-scheme:dark\)/)
+    assert.match(html, /grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/)
+    assert.match(html, /setCopyStatus\(modalOpen\(\)\?el\.modalCopyStatus:el\.copyStatus,value,type\)/)
+    assert.match(html, /const restore=el\.screenshotFrame\.disabled\?el\.bridgeCard:el\.screenshotFrame/)
+    assert.match(html, /if\(current\|\|failedCurrent\)step\.setAttribute\('aria-current','step'\)/)
+    assert.match(html, /else step\.removeAttribute\('aria-current'\)/)
+    assert.match(html, /!el\.screenshotModal\.contains\(document\.activeElement\)/)
+    assert.match(html, /step\.classList\.toggle\('failed',failedCurrent\)/)
+    assert.match(html, /\.step\.failed/)
+    assert.match(html, /\.bridge-card\[data-status="failed"\] \.progress span/)
+    assert.match(html, /\.copy-status\[data-state="error"\]\{background:#2a1211;border-color:#7f1d1d;color:#fca5a5\}/)
+    assert.match(html, /color:#fca5a5/)
+    assert.match(html, /color:#fbbf24/)
+    assert.match(html, /disconnected:'连接已关闭'/)
+    assert.match(html, /config\.targetUrl\|\|'等待读取目标网址'/)
+    assert.match(html, /本机 bridge 服务已关闭，当前页面无法继续读取状态。/)
+    assert.doesNotMatch(html, /Bridge status unavailable/)
     assert.match(html, /data-phase="profiling_experience"/)
     assert.match(html, /本机通道/)
     assert.match(html, /正在连接本机 Agent 与当前浏览器 profile/)
     assert.match(html, /本页只服务当前一次采集/)
+    assert.match(html, /Profile 内容/)
+    assert.match(html, /完整 raw profile 仍需 API token 读取/)
     assert.match(html, new RegExp(`id="stackprism-agent-bridge-config" type="application/json" nonce="${cspNonce}"`))
     assert.match(html, new RegExp(`<style nonce="${cspNonce}"`))
     assert.match(html, new RegExp(`<script nonce="${cspNonce}"`))
     assert.match(html, /fetch\('\/v1\/captures\/'\+config\.captureId/)
     assert.match(html, /textContent=value/)
     assert.match(html, /"bridgeToken":"spbt_[A-Za-z0-9_-]{43}"/)
+    assert.match(html, /"targetUrl":"https:\/\/93\.184\.216\.34\/app\?\[redacted\]"/)
 
     const second = await readJson(await fetch(created.body.bridgeUrl))
     assert.equal(second.status, 409)
@@ -844,7 +898,20 @@ test('python fallback bridge token can fetch request and post profile', async ()
     await acceptFinalUrl(ready, created.body.id, config.bridgeToken)
 
     const profile = profileFor(created.body.id, {
+      target: { language: 'zh-CN', pagePurpose: 'Landing page token=secret' },
+      techProfile: {
+        technologies: [
+          { name: 'Vue', category: '前端框架' },
+          { name: 'Tailwind CSS', category: 'UI / CSS 框架' }
+        ],
+        primaryFrontend: 'Vue',
+        uiFramework: 'Tailwind CSS',
+        buildRuntime: 'Vite',
+        thirdPartyServices: ['Stripe token=secret', 'Authorization: Bearer secret-token-123']
+      },
       visualProfile: {
+        colorTokens: ['#0f766e'],
+        fonts: ['Inter'],
         screenshot: {
           dataUrl: 'data:image/jpeg;base64,ZmFrZS1qcGVn',
           mimeType: 'image/jpeg',
@@ -852,8 +919,40 @@ test('python fallback bridge token can fetch request and post profile', async ()
           scope: 'visible_viewport'
         }
       },
+      layoutProfile: { landmarks: ['header', 'main'] },
+      componentProfile: { counts: { button: 3, card: 2 }, samples: [{ name: 'Hero card' }] },
+      interactionProfile: { transitions: ['opacity 0.2s'], stickyOrFixed: ['header'] },
+      uxProfile: {
+        pagePurpose: 'Product signup',
+        primaryUserPath: ['Open pricing'],
+        informationHierarchy: ['Hero', 'Features'],
+        contentGrouping: ['summary', 'pricing'],
+        navigationDepth: 'nav_links:4',
+        ctaStrategy: ['Start free'],
+        trustSignals: ['Customer logos'],
+        frictionPoints: ['Long form user@example.com']
+      },
+      assetProfile: {
+        scripts: ['https://cdn.example.com/app.js?token=secret'],
+        stylesheets: ['https://cdn.example.com/app.css?token=secret'],
+        cdnHints: ['cdn.example.com']
+      },
       evidence: {
-        privateText: 'not for bridge status'
+        privateText: 'not for bridge status',
+        token: config.bridgeToken
+      },
+      limitations: ['screenshot_metadata_not_requested'],
+      agentGuidance: {
+        summary: '优先复刻视觉层级和交互反馈。',
+        recreationPlan: {
+          implementationOrder: ['Define tokens', 'Build layout'],
+          designTokens: { colors: ['#0f766e'], fontFamilies: ['Inter'] },
+          layoutBlueprint: { informationHierarchy: ['Hero', 'Features'], contentGrouping: ['summary', 'pricing'] },
+          componentInventory: { counts: { button: 3 }, priorityTypes: ['button', 'card'], geometryIncluded: false },
+          interactionChecklist: { transitions: ['opacity 0.2s'] },
+          assetHints: { scriptCount: 1, stylesheetCount: 1, resourceDomains: ['cdn.example.com:2'] },
+          verificationChecklist: ['Compare screenshot', 'Smoke test interactions']
+        }
       }
     })
     const posted = await readJson(
@@ -869,6 +968,26 @@ test('python fallback bridge token can fetch request and post profile', async ()
     assert.equal(posted.body.preview.targetUrl, 'https://93.184.216.34/app?[redacted]')
     assert.equal(posted.body.preview.screenshot.dataUrl, 'data:image/jpeg;base64,ZmFrZS1qcGVn')
     assert.equal(posted.body.preview.screenshot.scope, 'visible_viewport')
+    assert.equal(posted.body.preview.contentSummary.cards[0].title, '复刻建议')
+    assert.equal(
+      posted.body.preview.contentSummary.cards.some(card => card.title === '技术栈'),
+      true
+    )
+    assert.equal(
+      posted.body.preview.contentSummary.cards.some(card => card.title === '复刻建议'),
+      true
+    )
+    assert.match(posted.body.preview.copyText, /# StackPrism Site Experience/)
+    assert.ok(posted.body.preview.copyText.indexOf('## 复刻建议') < posted.body.preview.copyText.indexOf('## 技术栈'))
+    assert.match(posted.body.preview.copyText, /## 技术栈/)
+    assert.match(posted.body.preview.copyText, /Vue/)
+    assert.match(posted.body.preview.copyText, /主要路径: Open pricing/)
+    assert.match(posted.body.preview.copyText, /信任信号: Customer logos/)
+    assert.match(posted.body.preview.copyText, /token=\[redacted\]/)
+    assert.match(posted.body.preview.copyText, /Authorization=\[redacted\]/)
+    assert.doesNotMatch(posted.body.preview.copyText, /data:image\/jpeg;base64/)
+    assert.doesNotMatch(posted.body.preview.copyText, /spbt_[A-Za-z0-9_-]{43}/)
+    assert.doesNotMatch(posted.body.preview.copyText, /not for bridge status|user@example\.com|token=secret|secret-token-123/)
     assert.equal(JSON.stringify(posted.body).includes('not for bridge status'), false)
 
     const completedControl = await readJson(
@@ -888,6 +1007,7 @@ test('python fallback bridge token can fetch request and post profile', async ()
     assert.equal(completedStatus.status, 200)
     assert.equal(completedStatus.body.preview.targetUrl, 'https://93.184.216.34/app?[redacted]')
     assert.equal(completedStatus.body.preview.screenshot.mimeType, 'image/jpeg')
+    assert.equal(completedStatus.body.preview.copyText, posted.body.preview.copyText)
     assert.equal(JSON.stringify(completedStatus.body).includes('not for bridge status'), false)
 
     const forbidden = await readJson(
@@ -2441,11 +2561,15 @@ test('python fallback rejects preflight and ambiguous raw request shell', async 
 
     const encodedSlashPath = await rawHttp(url.port, ['GET /v1%2fcaptures HTTP/1.1', `Host: ${url.host}`, 'Connection: close', '', ''])
     assert.match(encodedSlashPath, /400/)
-    assert.match(encodedSlashPath, /INVALID_REQUEST/)
+    assert.match(encodedSlashPath, /Encoded path separators or dot segments are not allowed\./)
 
     const encodedBackslashPath = await rawHttp(url.port, ['GET /v1%5ccaptures HTTP/1.1', `Host: ${url.host}`, 'Connection: close', '', ''])
     assert.match(encodedBackslashPath, /400/)
-    assert.match(encodedBackslashPath, /INVALID_REQUEST/)
+    assert.match(encodedBackslashPath, /Encoded path separators or dot segments are not allowed\./)
+
+    const rawBackslashPath = await rawHttp(url.port, ['GET /v1\\captures HTTP/1.1', `Host: ${url.host}`, 'Connection: close', '', ''])
+    assert.match(rawBackslashPath, /400/)
+    assert.match(rawBackslashPath, /Encoded path separators or dot segments are not allowed\./)
 
     const dotSegmentPath = await rawHttp(url.port, ['GET /v1/../health HTTP/1.1', `Host: ${url.host}`, 'Connection: close', '', ''])
     assert.match(dotSegmentPath, /400/)
