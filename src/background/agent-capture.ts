@@ -146,7 +146,10 @@ const runCapture = async (state: AgentCaptureState, request: AgentCaptureRequest
     state.updatedAt = Date.now()
     await saveAgentCaptureState(state)
     state = await waitForAgentCaptureNetworkEvidence(state)
-    const networkError = validateAgentCaptureNetwork(state, request)
+    const settings = await loadDetectorSettings()
+    const networkError = validateAgentCaptureNetwork(state, request, {
+      allowAllNetworkTargets: settings.agentBridgeAllowAllNetworkTargets === true
+    })
     if (networkError) {
       await failAgentCapture(state, networkError.code, networkError.message, networkError.details || {})
       return
@@ -180,7 +183,7 @@ const runCapture = async (state: AgentCaptureState, request: AgentCaptureRequest
         throw makeCaptureFailureError('TARGET_INJECTION_FAILED', caught)
       }
     }
-    const [settings, data, tab] = await Promise.all([loadDetectorSettings(), getTabData(targetTabId), getTabSnapshot(targetTabId)])
+    const [data, tab] = await Promise.all([getTabData(targetTabId), getTabSnapshot(targetTabId)])
     const raw = shouldRunTech ? await buildPopupRawResult(data, settings, tab) : null
     const capturedAt = new Date().toISOString()
     const screenshotResult =

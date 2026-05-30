@@ -72,6 +72,7 @@
 ## 用户可见门禁
 
 - Agent Bridge 必须有用户可见的持久设置 `agentBridgeEnabled`，写入 `chrome.storage.local` 作为本机 profile 级 opt-in，并进入运行时 `DetectorSettings` 归一化流程；设置页必须明确该开关会允许本地 Agent Bridge 读取当前浏览器可观测的页面技术与体验摘要并交给用户本机 loopback bridge。
+- Agent Bridge 允许一个独立的高风险设置 `agentBridgeAllowAllNetworkTargets`，同样只写入 `chrome.storage.local`，默认 `false`，且只有在 `agentBridgeEnabled = true` 时生效。设置页保存开启时必须要求用户人工确认；开启后扩展侧可以放行本机、私网、保留地址和 DNS/proxy 映射到私网的目标，但不得放开非 `http:` / `https:` 协议、bridge self-target、token/session 校验或本地 bridge server 的创建阶段默认 URL policy。
 - 对 Chrome Web Store / Edge Add-ons 发布包，`agentBridgeEnabled` 默认必须为 `false`，除非发布前完成商店隐私披露、用户文档和发布说明更新，并由维护者显式记录改为默认开启的理由。开发/E2E 可以通过测试设置显式开启，但不得把测试设置写成生产默认。历史上如果 sync 里曾出现同名字段，也必须被视为旧数据并忽略，不得自动开启。
 - bridge content script 在读取 DOM config 后、向 background 发起 `START_AGENT_CAPTURE` 前，必须先通过 `AGENT_BRIDGE_HELLO` 让 background 校验 `agentBridgeEnabled`。未开启时 capture 失败为 `AGENT_BRIDGE_DISABLED`，不得打开目标 tab、不得运行检测、不得读取或回传 profile。
 - 该门禁不是每次 capture 的交互确认；它是一次性用户可见 opt-in。启用后仍保持“不要求用户点击插件按钮、复制或下载 JSON”的 Agent 使用体验。
@@ -210,6 +211,7 @@ Target policy:
 - `keepTabOpen = false` 时，插件必须关闭自己创建的目标 tab；不得关闭用户原本打开的 tab。
 - Agent Bridge 第一版只支持普通浏览器 profile，不支持 incognito/split-incognito 上下文。bridge tab 或目标 tab 的 `incognito` 为 true 时必须失败为 `INCOGNITO_NOT_SUPPORTED`，不得尝试跨普通窗口与隐身窗口传递 capture 状态。
 - `allowPrivateNetworkTarget = false` 时拒绝目标 URL 指向 loopback、link-local、private IPv4/IPv6 网段，降低本地接口被误用风险；用户确需分析本地开发站点时必须显式开启。
+- `agentBridgeAllowAllNetworkTargets = true` 是用户在扩展设置页确认过的 profile 级高风险覆盖，只作用于扩展侧 target-loaded 网络证据门禁；repo-local JS bridge 与 Python fallback 在创建 capture 时仍以 request option / CLI 参数显式控制 private-network policy。
 - private network 判断不能只看 URL 字面量；bridge server 必须对 hostname 做 DNS 解析，拒绝解析到 loopback、link-local、private IPv4/IPv6 网段的目标，覆盖 `dev.local`、自定义 hosts 和 bridge resolver 可见的私网解析结果。
 - Private-network 防护边界必须写清楚：bridge server 的 DNS 预检和 `target_loaded` final URL 校验只能阻止创建 capture、继续采集和交付 profile，不能保证浏览器在导航过程中绝不会向私网地址发出一次请求；DNS rebinding、浏览器解析器差异或服务端重定向可能在 final URL 校验前已经产生网络触达。第一版不得把该能力宣传为浏览器级 SSRF 防火墙；若验收要求是“零私网触达”，必须另起任务评估 CDP/proxy/Native Messaging 或扩展网络拦截方案。
 - URL policy 必须拆成可测试纯函数，接收标准化 URL、当前 bridge origin、`allowPrivateNetworkTarget` 和可注入 resolver 返回值；单元测试只能使用 fixture 驱动的假 resolver，不得依赖本机 hosts、VPN、DNS 缓存或外网解析结果。
@@ -341,6 +343,9 @@ Token handling:
 - `apiToken` 不放在 URL 或 bridge 页面，避免进入浏览器历史、页面源码、日志和 referrer。
 - bridge 页面由本地脚本直接渲染，在 HTML 内嵌只供 bridge content script 读取的一次性 `bridgeToken`；它不是 Agent 使用的 `apiToken`。
 - bridge 页面自身的内联脚本若需要渲染状态，只允许使用 `bridgeToken` 读取同一 capture 的 `GET /v1/captures/{id}`；不得读取 profile。
+- capture 完成后，bridge 页面可以把同一 status preview 渲染为结果工作台：目标网址、截图预览、截图放大预览、下载截图、复制截图、复制由 profile 生成的 Markdown 摘要，以及下方分组 profile 内容卡片。该工作台只能使用服务端生成的 `preview.contentSummary` 和 `preview.copyText`，不得在页面端读取或重组 raw profile。
+- `preview.copyText` 必须是受限 Agent 摘要，不得包含 raw profile、截图 data URL、`apiToken`、`bridgeToken`、nonce、Authorization、完整敏感文本或未脱敏 URL query。生成时至少要脱敏 URL query、token-like id、email、手机号和 token/secret 字段。
+- 复制截图依赖浏览器 Clipboard API。失败时页面必须明确显示错误，不得静默降级为“已复制”，也不得把截图 data URL 复制成文本伪装成功。用户下载或复制后的截图由浏览器/操作系统管理，不属于 bridge profile TTL 自动清理范围。
 - `bridgeToken` 以 DOM 可读 JSON script 形式存在是为了适配 content script isolated world，不得被描述为对其他已安装扩展保密。安全说明必须明确：同浏览器 profile 中拥有 loopback 页面访问能力的恶意扩展、DevTools 用户或浏览器自动化工具属于本地受信边界之外，第一版只防普通网页跨站访问、错误 Host、错误 token、重复 token render 和 profile 越权读取。
 - `/bridge` 响应必须使用 `Content-Type: text/html; charset=utf-8`。
 - `/bridge` 渲染 `bridgeToken` 前必须先执行 Host、request target、query schema 和来源导航校验。若请求带跨站 `Referer` 或 `Sec-Fetch-Site: cross-site`，必须返回 `403 ORIGIN_NOT_ALLOWED` 且不渲染 token；由系统浏览器打开、地址栏打开或同源刷新产生的无来源头、`Sec-Fetch-Site: none` 或 `same-origin` 请求可以继续校验 session/capture/nonce。

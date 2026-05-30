@@ -1610,6 +1610,98 @@ test('agent capture fails closed when Chrome reports private target network addr
   delete globalThis.chrome
 })
 
+test('agent capture can be explicitly allowed to use all network targets from local settings', async () => {
+  resetLoadTsModuleCaches()
+  const env = makeChrome()
+  enableBridgeStatusAck(env)
+  enableFastHeaderFallback()
+  let detectionAttempted = false
+  env.chrome.storage.local.get = async () => ({
+    stackPrismSettings: { agentBridgeEnabled: true, agentBridgeAllowAllNetworkTargets: true }
+  })
+  env.chrome.tabs.create = async create => {
+    const tab = { id: 3, windowId: 1, url: create.url, title: 'Target', incognito: false, status: 'loading' }
+    env.tabs.push(tab)
+    setTimeout(() => {
+      for (const listener of env.webRequestEvents.onResponseStarted) {
+        listener({
+          tabId: 3,
+          requestId: 'target-main-frame',
+          url: create.url,
+          type: 'main_frame',
+          method: 'GET',
+          statusCode: 200,
+          statusLine: 'HTTP/1.1 200 OK',
+          fromCache: false,
+          ip: '127.0.0.1'
+        })
+      }
+      tab.status = 'complete'
+      for (const listener of env.tabEvents.onUpdated) {
+        listener(3, { status: 'complete', url: tab.url }, tab)
+      }
+    }, 0)
+    return tab
+  }
+  env.chrome.scripting.executeScript = async () => {
+    detectionAttempted = true
+    return [{ result: { visual: {}, layout: {}, components: {}, interaction: {}, ux: {}, assets: {}, evidence: {} } }]
+  }
+  globalThis.chrome = env.chrome
+  const [
+    { registerBridgeSession },
+    { startAgentCapture, registerAgentProfileTransferPort },
+    { listAgentCaptureIds },
+    { loadDetectorSettings }
+  ] = await Promise.all([
+    loadTsModule('src/background/agent-bridge-session.ts'),
+    loadTsModule('src/background/agent-capture.ts'),
+    loadTsModule('src/background/agent-capture-state.ts'),
+    loadTsModule('src/background/detector-settings.ts'),
+    loadTsModule('src/background/index.ts')
+  ])
+  await registerBridgeSession({
+    tabId: 1,
+    windowId: 1,
+    bridgeOrigin: 'http://127.0.0.1:17370',
+    sessionId,
+    captureId,
+    nonce
+  })
+  await connectProfileTransferPort(env, registerAgentProfileTransferPort)
+
+  const settings = await loadDetectorSettings()
+  assert.equal(settings.agentBridgeAllowAllNetworkTargets, true)
+
+  const response = await startAgentCapture(
+    {
+      type: 'START_AGENT_CAPTURE',
+      captureId,
+      sessionId,
+      nonce,
+      bridgeOrigin: 'http://127.0.0.1:17370',
+      request: {
+        ...baseRequest,
+        include: ['tech'],
+        options: { ...baseRequest.options, forceRefresh: false }
+      },
+      capabilities: { ...fullCapabilities }
+    },
+    { url: `http://127.0.0.1:17370/bridge?session=${sessionId}&capture=${captureId}&nonce=${nonce}`, tab: { id: 1, windowId: 1 } }
+  )
+
+  assert.equal(response.ok, true)
+  await waitForMessage(env.messages, message => message.type === 'AGENT_PROFILE_TRANSFER_COMPLETE')
+  assert.equal(
+    env.messages.some(message => message.type === 'AGENT_CAPTURE_STATUS' && message.payload.error?.code === 'PRIVATE_NETWORK_TARGET_BLOCKED'),
+    false
+  )
+  assert.equal(detectionAttempted, true)
+  assert.deepEqual(await listAgentCaptureIds(), [])
+  delete globalThis.chrome
+  restoreFetch()
+})
+
 test('agent capture reports sanitized target injection failure details', async () => {
   const env = makeChrome()
   enableBridgeStatusAck(env)
@@ -2084,8 +2176,11 @@ test('new tab capture waits for target tab load completion before profiling', as
     }, 20)
     return tab
   }
-  env.chrome.scripting.executeScript = async ({ target }) => {
-    if (env.tabs.find(tab => tab.id === target.tabId)?.status !== 'complete') {
+  env.chrome.scripting.executeScript = async options => {
+    const profilerCall =
+      options.files?.[0] === 'injected/experience-profiler.iife.js' ||
+      String(options.func || '').includes('__STACKPRISM_EXPERIENCE_OPTIONS__')
+    if (profilerCall && env.tabs.find(tab => tab.id === options.target.tabId)?.status !== 'complete') {
       profiledWhileLoading = true
     }
     return [{ result: { visual: {}, layout: {}, components: {}, interaction: {}, ux: {}, assets: {}, evidence: {} } }]

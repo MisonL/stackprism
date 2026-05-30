@@ -13,12 +13,28 @@ test('normalizes agent bridge opt-in as a local-only setting', async () => {
   const { defaultSettings, normalizeSettings, normalizeSettingsWithLocalOptIn } = await loadTsModule('src/utils/normalize-settings.ts')
 
   assert.equal(defaultSettings().agentBridgeEnabled, false)
+  assert.equal(defaultSettings().agentBridgeAllowAllNetworkTargets, false)
   assert.equal(normalizeSettings({}).agentBridgeEnabled, false)
   assert.equal(normalizeSettings({ agentBridgeEnabled: 'true' }, { allowAgentBridge: true }).agentBridgeEnabled, false)
   assert.equal(normalizeSettings({ agentBridgeEnabled: true }).agentBridgeEnabled, false)
   assert.equal(normalizeSettings({ agentBridgeEnabled: true }, { allowAgentBridge: true }).agentBridgeEnabled, true)
+  assert.equal(normalizeSettings({ agentBridgeAllowAllNetworkTargets: true }).agentBridgeAllowAllNetworkTargets, false)
+  assert.equal(normalizeSettings({ agentBridgeAllowAllNetworkTargets: true }, { allowAgentBridge: true, allowAgentBridgeNetworkOverride: true }).agentBridgeAllowAllNetworkTargets, false)
   assert.equal(normalizeSettingsWithLocalOptIn({ agentBridgeEnabled: true }, {}).agentBridgeEnabled, false)
   assert.equal(normalizeSettingsWithLocalOptIn({}, { agentBridgeEnabled: true }).agentBridgeEnabled, true)
+  assert.equal(
+    normalizeSettingsWithLocalOptIn({ agentBridgeAllowAllNetworkTargets: true }, {}).agentBridgeAllowAllNetworkTargets,
+    false
+  )
+  assert.equal(
+    normalizeSettingsWithLocalOptIn({}, { agentBridgeAllowAllNetworkTargets: true }).agentBridgeAllowAllNetworkTargets,
+    false
+  )
+  assert.equal(
+    normalizeSettingsWithLocalOptIn({}, { agentBridgeEnabled: true, agentBridgeAllowAllNetworkTargets: true })
+      .agentBridgeAllowAllNetworkTargets,
+    true
+  )
   assert.equal(
     normalizeSettingsWithLocalOptIn({ disabledTechnologies: ['React'] }, { agentBridgeEnabled: true }).disabledTechnologies[0],
     'React'
@@ -28,7 +44,7 @@ test('normalizes agent bridge opt-in as a local-only setting', async () => {
 test('detector settings cache keeps local agent bridge opt-in during sync updates', async () => {
   const storage = {
     sync: { stackPrismSettings: { disabledTechnologies: [] } },
-    local: { stackPrismSettings: { agentBridgeEnabled: true } }
+    local: { stackPrismSettings: { agentBridgeEnabled: true, agentBridgeAllowAllNetworkTargets: true } }
   }
   globalThis.chrome = {
     storage: {
@@ -39,9 +55,14 @@ test('detector settings cache keeps local agent bridge opt-in during sync update
   const { applyDetectorSettingsUpdate, loadDetectorSettings } = await loadTsModule('src/background/detector-settings.ts')
 
   assert.equal((await loadDetectorSettings()).agentBridgeEnabled, true)
-  const updated = applyDetectorSettingsUpdate({ disabledTechnologies: ['React'] }, { agentBridgeEnabled: true })
+  assert.equal((await loadDetectorSettings()).agentBridgeAllowAllNetworkTargets, true)
+  const updated = applyDetectorSettingsUpdate(
+    { disabledTechnologies: ['React'] },
+    { agentBridgeEnabled: true, agentBridgeAllowAllNetworkTargets: true }
+  )
 
   assert.equal(updated.agentBridgeEnabled, true)
+  assert.equal(updated.agentBridgeAllowAllNetworkTargets, true)
   assert.deepEqual(updated.disabledTechnologies, ['React'])
   delete globalThis.chrome
 })
@@ -69,6 +90,7 @@ test('detector settings preserves sync settings when local opt-in storage is una
     const settings = await loadDetectorSettings()
     assert.deepEqual(settings.disabledTechnologies, ['React'])
     assert.equal(settings.agentBridgeEnabled, false)
+    assert.equal(settings.agentBridgeAllowAllNetworkTargets, false)
     assert.equal(warnings.length, 1)
     assert.equal(warnings[0][1], 'stackPrismSettings')
     assert.notEqual(warnings[0][2] instanceof Error, true)

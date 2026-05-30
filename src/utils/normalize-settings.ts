@@ -11,6 +11,7 @@ import {
 
 export interface NormalizeSettingsOptions {
   allowAgentBridge?: boolean
+  allowAgentBridgeNetworkOverride?: boolean
 }
 
 export const cleanStringArray = (value: unknown): string[] => {
@@ -62,20 +63,27 @@ export const cleanCustomRules = (value: unknown): CustomRule[] => {
 export const normalizeSettings = (value: unknown = {}, options: NormalizeSettingsOptions = {}): DetectorSettings => {
   const v = (value ?? {}) as Partial<DetectorSettings>
   const customCss = typeof v.customCss === 'string' ? v.customCss.slice(0, CUSTOM_RULE_LIMITS.customCss) : ''
+  const agentBridgeEnabled = options.allowAgentBridge === true && v.agentBridgeEnabled === true
   return {
     disabledCategories: cleanStringArray(v.disabledCategories),
     disabledTechnologies: cleanStringArray(v.disabledTechnologies),
     customRules: cleanCustomRules(v.customRules),
     customCss,
-    agentBridgeEnabled: options.allowAgentBridge === true && v.agentBridgeEnabled === true
+    agentBridgeEnabled,
+    agentBridgeAllowAllNetworkTargets: agentBridgeEnabled && options.allowAgentBridgeNetworkOverride === true && v.agentBridgeAllowAllNetworkTargets === true
   }
 }
 
 export const normalizeSettingsWithLocalOptIn = (syncValue: unknown = {}, localValue: unknown = {}): DetectorSettings => {
   const local = (localValue ?? {}) as Partial<DetectorSettings>
+  const localAgentBridgeEnabled = local.agentBridgeEnabled === true
   return normalizeSettings(
-    { ...(syncValue as Record<string, unknown>), agentBridgeEnabled: local.agentBridgeEnabled },
-    { allowAgentBridge: true }
+    {
+      ...(syncValue as Record<string, unknown>),
+      agentBridgeEnabled: localAgentBridgeEnabled,
+      agentBridgeAllowAllNetworkTargets: localAgentBridgeEnabled ? local.agentBridgeAllowAllNetworkTargets : false
+    },
+    { allowAgentBridge: true, allowAgentBridgeNetworkOverride: true }
   )
 }
 

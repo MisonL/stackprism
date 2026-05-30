@@ -34,7 +34,7 @@
       </div>
     </div>
   </header>
-  <main class="settings-shell">
+  <main ref="settingsShell" class="settings-shell" tabindex="-1">
     <div v-if="status.message" class="msg" :class="status.type" role="status" aria-live="polite">{{ status.message }}</div>
 
     <section class="panel">
@@ -55,7 +55,11 @@
 
     <section
       class="panel agent-bridge-panel"
-      :class="{ 'is-enabled': savedAgentBridgeEnabled, 'has-pending-change': hasPendingAgentBridgeChange }"
+      :class="{
+        'is-enabled': savedAgentBridgeEnabled,
+        'has-pending-change': hasPendingAgentBridgeChange,
+        'has-network-override': state.settings.agentBridgeAllowAllNetworkTargets
+      }"
     >
       <div class="agent-bridge-main">
         <div class="agent-bridge-title">
@@ -68,22 +72,42 @@
             <p>只读采集目标页面的技术栈、视觉结构与体验摘要，供本机 Agent 使用。</p>
           </div>
         </div>
-        <span class="agent-bridge-state" :class="{ active: savedAgentBridgeEnabled, pending: hasPendingAgentBridgeChange }">
+        <span
+          class="agent-bridge-state"
+          :class="{
+            active: savedAgentBridgeEnabled,
+            pending: hasPendingAgentBridgeChange,
+            warning: state.settings.agentBridgeAllowAllNetworkTargets
+          }"
+        >
           {{ agentBridgeStateLabel }}
         </span>
       </div>
       <div class="agent-bridge-control">
-        <label class="agent-bridge-toggle">
-          <Checkbox v-model="state.settings.agentBridgeEnabled" />
-          <span>
-            <strong>允许本机访问</strong>
-            <small>{{ agentBridgeToggleHint }}</small>
-          </span>
-        </label>
+        <div class="agent-bridge-toggle-stack">
+          <label class="agent-bridge-toggle">
+            <Checkbox v-model="state.settings.agentBridgeEnabled" />
+            <span>
+              <strong>允许本机访问</strong>
+              <small>{{ agentBridgeToggleHint }}</small>
+            </span>
+          </label>
+          <label class="agent-bridge-toggle agent-bridge-network-toggle">
+            <Checkbox v-model="state.settings.agentBridgeAllowAllNetworkTargets" :disabled="!state.settings.agentBridgeEnabled" />
+            <span>
+              <strong>允许所有网络目标</strong>
+              <small>{{ agentBridgeNetworkOverrideHint }}</small>
+            </span>
+          </label>
+        </div>
         <div class="agent-bridge-facts" aria-label="Agent Bridge 边界">
           <span>
             <ShieldCheck :size="13" :stroke-width="2" />
             手动开启
+          </span>
+          <span :class="{ warning: state.settings.agentBridgeAllowAllNetworkTargets }">
+            <Network :size="13" :stroke-width="2" />
+            {{ state.settings.agentBridgeAllowAllNetworkTargets ? '网络放开' : '网络受限' }}
           </span>
           <span>
             <Server :size="13" :stroke-width="2" />
@@ -206,10 +230,33 @@
       <Textarea v-model="rulesJsonText" :rows="13" />
     </section>
   </main>
+  <Teleport to="body">
+    <div v-if="confirmDialog.open" class="confirm-backdrop" @click.self="resolveConfirmation(false)">
+      <section
+        ref="confirmDialogPanel"
+        class="confirm-modal"
+        :class="`is-${confirmDialog.tone}`"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-confirm-title"
+        aria-describedby="settings-confirm-message"
+        tabindex="-1"
+      >
+        <p id="settings-confirm-title" class="confirm-title">{{ confirmDialog.title }}</p>
+        <p id="settings-confirm-message" class="confirm-message">{{ confirmDialog.message }}</p>
+        <div class="confirm-actions">
+          <RippleButton @click="resolveConfirmation(false)">{{ confirmDialog.cancelLabel }}</RippleButton>
+          <RippleButton class="primary" variant="primary" @click="resolveConfirmation(true)">
+            {{ confirmDialog.confirmLabel }}
+          </RippleButton>
+        </div>
+      </section>
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
-  import { onMounted, reactive, ref, watch, computed } from 'vue'
+  import { nextTick, onMounted, onUnmounted, reactive, ref, watch, computed } from 'vue'
   import {
     BookOpen,
     Bot,
@@ -217,6 +264,7 @@
     Inbox,
     Monitor,
     Moon,
+    Network,
     Pencil,
     RotateCcw,
     Save,
@@ -234,7 +282,13 @@
   import { applyCustomCss } from '@/utils/apply-custom-css'
   import { cleanCustomRules, cleanStringArray, defaultSettings, normalizeSettings } from '@/utils/normalize-settings'
   import { buildRuleContributionUrl } from '@/utils/build-issue-url'
-  import { AGENT_BRIDGE_ENABLED_STORAGE_KEY, REPOSITORY_URL, SETTINGS_STORAGE_KEY, STATUS_HIDE_DELAY } from '@/utils/constants'
+  import {
+    AGENT_BRIDGE_ALLOW_ALL_NETWORK_TARGETS_STORAGE_KEY,
+    AGENT_BRIDGE_ENABLED_STORAGE_KEY,
+    REPOSITORY_URL,
+    SETTINGS_STORAGE_KEY,
+    STATUS_HIDE_DELAY
+  } from '@/utils/constants'
   import { ALLOWED_CONFIDENCES, ALLOWED_MATCH_TARGETS, ALLOWED_MATCH_TYPES, CUSTOM_RULE_LIMITS } from '@/types/settings'
   import { cycleTheme, getStoredTheme, setStoredTheme, themeLabel, type ThemeMode } from '@/utils/theme'
 
@@ -268,7 +322,22 @@
   const version = ref('')
   const theme = ref<ThemeMode>('auto')
   const savedAgentBridgeEnabled = ref(false)
+  const savedAgentBridgeAllowAllNetworkTargets = ref(false)
+  const confirmDialogPanel = ref<HTMLElement | null>(null)
+  const settingsShell = ref<HTMLElement | null>(null)
   let statusTimer = 0
+  let confirmResolver: ((value: boolean) => void) | null = null
+  let confirmReturnFocusTarget: HTMLElement | null = null
+  let confirmKeydownBound = false
+
+  const confirmDialog = reactive({
+    open: false,
+    title: '',
+    message: '',
+    confirmLabel: '确认',
+    cancelLabel: '取消',
+    tone: 'warning' as 'warning' | 'danger'
+  })
 
   const toggleTheme = async () => {
     const next = cycleTheme(theme.value)
@@ -300,16 +369,33 @@
       rule => `${rule.category} · ${rule.kind} · ${rule.confidence} · ${rule.matchType} · ${rule.patterns.length} 条匹配规则`
     )
   )
-  const hasPendingAgentBridgeChange = computed(() => state.settings.agentBridgeEnabled !== savedAgentBridgeEnabled.value)
+  const hasPendingAgentBridgeAccessChange = computed(() => state.settings.agentBridgeEnabled !== savedAgentBridgeEnabled.value)
+  const hasPendingAgentBridgeNetworkOverrideChange = computed(
+    () => state.settings.agentBridgeAllowAllNetworkTargets !== savedAgentBridgeAllowAllNetworkTargets.value
+  )
+  const hasPendingAgentBridgeChange = computed(
+    () => hasPendingAgentBridgeAccessChange.value || hasPendingAgentBridgeNetworkOverrideChange.value
+  )
   const agentBridgeStateLabel = computed(() => {
-    if (hasPendingAgentBridgeChange.value) return state.settings.agentBridgeEnabled ? '待保存启用' : '待保存关闭'
+    if (hasPendingAgentBridgeAccessChange.value) return state.settings.agentBridgeEnabled ? '待保存启用' : '待保存关闭'
+    if (hasPendingAgentBridgeNetworkOverrideChange.value) {
+      return state.settings.agentBridgeAllowAllNetworkTargets ? '待保存放开' : '待保存收紧'
+    }
+    if (savedAgentBridgeAllowAllNetworkTargets.value) return '网络已放开'
     return savedAgentBridgeEnabled.value ? '启用中' : '已关闭'
   })
   const agentBridgeToggleHint = computed(() =>
-    hasPendingAgentBridgeChange.value
+    hasPendingAgentBridgeAccessChange.value
       ? '点击保存设置后生效；未保存前仍按当前 profile 的已保存状态处理。'
       : '仅保存在当前浏览器 profile，关闭后拒绝捕获请求。'
   )
+  const agentBridgeNetworkOverrideHint = computed(() => {
+    if (!state.settings.agentBridgeEnabled) return '需先允许本机访问；关闭 Agent Bridge 时不生效。'
+    if (hasPendingAgentBridgeNetworkOverrideChange.value) return '点击保存设置时会要求确认；未保存前仍按已保存策略处理。'
+    return state.settings.agentBridgeAllowAllNetworkTargets
+      ? '已允许采集本机、私网、保留地址和 DNS/proxy 映射到私网的目标。'
+      : '默认拦截本机、私网、保留地址和 DNS/proxy 映射到私网的目标。'
+  })
 
   const lines = (value: string) => {
     return String(value || '')
@@ -337,6 +423,108 @@
     const more = errors.length > visible.length ? `\n还有 ${errors.length - visible.length} 个问题，请先修正上面的问题再保存。` : ''
     showStatus(`规则语法检查未通过：\n${visible.join('\n')}${more}`, 'error')
   }
+
+  const getConfirmControls = () => Array.from(confirmDialogPanel.value?.querySelectorAll<HTMLElement>('button:not(:disabled)') || [])
+
+  const focusConfirmStart = () => {
+    const controls = getConfirmControls()
+    ;(controls[0] || confirmDialogPanel.value)?.focus()
+  }
+
+  const trapConfirmationFocus = (event: KeyboardEvent) => {
+    if (!confirmDialog.open) return
+    const controls = getConfirmControls()
+    if (!controls.length) {
+      event.preventDefault()
+      confirmDialogPanel.value?.focus()
+      return
+    }
+    const first = controls[0]
+    const last = controls[controls.length - 1]
+    const active = document.activeElement
+    if (!confirmDialogPanel.value?.contains(active)) {
+      event.preventDefault()
+      ;(event.shiftKey ? last : first).focus()
+    } else if (event.shiftKey && active === first) {
+      event.preventDefault()
+      last.focus()
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault()
+      first.focus()
+    }
+  }
+
+  const onConfirmDialogKeydown = (event: KeyboardEvent) => {
+    if (!confirmDialog.open) return
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      resolveConfirmation(false)
+      return
+    }
+    if (event.key === 'Tab') trapConfirmationFocus(event)
+  }
+
+  const bindConfirmDialogKeydown = () => {
+    if (confirmKeydownBound) return
+    document.addEventListener('keydown', onConfirmDialogKeydown)
+    confirmKeydownBound = true
+  }
+
+  const unbindConfirmDialogKeydown = () => {
+    if (!confirmKeydownBound) return
+    document.removeEventListener('keydown', onConfirmDialogKeydown)
+    confirmKeydownBound = false
+  }
+
+  const requestConfirmation = async (options: {
+    title: string
+    message: string
+    confirmLabel: string
+    cancelLabel?: string
+    tone?: 'warning' | 'danger'
+  }) => {
+    if (confirmResolver) confirmResolver(false)
+    const active = document.activeElement
+    confirmReturnFocusTarget = active instanceof HTMLElement && active !== document.body ? active : null
+    return new Promise<boolean>(resolve => {
+      confirmResolver = resolve
+      Object.assign(confirmDialog, {
+        open: true,
+        title: options.title,
+        message: options.message,
+        confirmLabel: options.confirmLabel,
+        cancelLabel: options.cancelLabel || '取消',
+        tone: options.tone || 'warning'
+      })
+      bindConfirmDialogKeydown()
+      nextTick(focusConfirmStart)
+    })
+  }
+
+  const resolveConfirmation = (value: boolean) => {
+    const resolver = confirmResolver
+    const returnTarget = confirmReturnFocusTarget
+    confirmResolver = null
+    confirmReturnFocusTarget = null
+    confirmDialog.open = false
+    unbindConfirmDialogKeydown()
+    resolver?.(value)
+    nextTick(() => {
+      if (returnTarget?.isConnected) returnTarget.focus()
+      else settingsShell.value?.focus()
+    })
+  }
+
+  const cancelPendingConfirmation = () => {
+    const resolver = confirmResolver
+    confirmResolver = null
+    confirmReturnFocusTarget = null
+    confirmDialog.open = false
+    unbindConfirmDialogKeydown()
+    resolver?.(false)
+  }
+
+  onUnmounted(cancelPendingConfirmation)
 
   const validateRegexPatterns = (rule: any, label = '规则') => {
     if (rule.matchType === 'keyword') return ''
@@ -545,9 +733,10 @@
       return normalizeSettings(
         {
           ...stored[SETTINGS_STORAGE_KEY],
-          agentBridgeEnabled: local[SETTINGS_STORAGE_KEY]?.[AGENT_BRIDGE_ENABLED_STORAGE_KEY]
+          agentBridgeEnabled: local[SETTINGS_STORAGE_KEY]?.[AGENT_BRIDGE_ENABLED_STORAGE_KEY],
+          agentBridgeAllowAllNetworkTargets: local[SETTINGS_STORAGE_KEY]?.[AGENT_BRIDGE_ALLOW_ALL_NETWORK_TARGETS_STORAGE_KEY]
         },
-        { allowAgentBridge: true }
+        { allowAgentBridge: true, allowAgentBridgeNetworkOverride: true }
       )
     } catch {
       return defaultSettings()
@@ -565,6 +754,7 @@
   const applyLoadedSettings = (settings: ReturnType<typeof defaultSettings>) => {
     state.settings = settings
     savedAgentBridgeEnabled.value = settings.agentBridgeEnabled
+    savedAgentBridgeAllowAllNetworkTargets.value = settings.agentBridgeAllowAllNetworkTargets
     syncFromSettings()
   }
 
@@ -716,15 +906,30 @@
     collectCategorySettings()
     const jsonRules = parseRulesJsonTextarea()
     if (!jsonRules) return
+    const allowAllNetworkTargets = state.settings.agentBridgeEnabled && state.settings.agentBridgeAllowAllNetworkTargets
+    if (allowAllNetworkTargets && !savedAgentBridgeAllowAllNetworkTargets.value) {
+      const confirmed = await requestConfirmation({
+        title: '放开所有网络目标？',
+        message:
+          '这会允许 Agent Bridge 采集本机、内网、保留地址和 DNS/proxy 映射到私网的目标。仅在你确认当前本机 Agent、bridge 进程和浏览器 profile 可信时开启。',
+        confirmLabel: '确认保存',
+        tone: 'warning'
+      })
+      if (!confirmed) {
+        showStatus('已取消保存。', 'error')
+        return
+      }
+    }
     const settings = normalizeSettings(
       {
         disabledCategories: state.settings.disabledCategories,
         disabledTechnologies: cleanStringArray(lines(disabledTechnologiesText.value)),
         customRules: jsonRules,
         customCss: customCssText.value,
-        agentBridgeEnabled: state.settings.agentBridgeEnabled
+        agentBridgeEnabled: state.settings.agentBridgeEnabled,
+        agentBridgeAllowAllNetworkTargets: allowAllNetworkTargets
       },
-      { allowAgentBridge: true }
+      { allowAgentBridge: true, allowAgentBridgeNetworkOverride: true }
     )
     const syncSettings = normalizeSettings({
       disabledCategories: settings.disabledCategories,
@@ -735,7 +940,12 @@
     try {
       await Promise.all([
         chrome.storage.sync.set({ [SETTINGS_STORAGE_KEY]: syncSettings }),
-        chrome.storage.local.set({ [SETTINGS_STORAGE_KEY]: { [AGENT_BRIDGE_ENABLED_STORAGE_KEY]: settings.agentBridgeEnabled } })
+        chrome.storage.local.set({
+          [SETTINGS_STORAGE_KEY]: {
+            [AGENT_BRIDGE_ENABLED_STORAGE_KEY]: settings.agentBridgeEnabled,
+            [AGENT_BRIDGE_ALLOW_ALL_NETWORK_TARGETS_STORAGE_KEY]: settings.agentBridgeAllowAllNetworkTargets
+          }
+        })
       ])
       applyLoadedSettings(settings)
       applyCustomCss(settings.customCss)
@@ -746,7 +956,13 @@
   }
 
   const resetSettings = async () => {
-    if (!confirm('确定恢复默认设置？自定义规则和自定义 CSS 会被清空。')) return
+    const confirmed = await requestConfirmation({
+      title: '恢复默认设置？',
+      message: '自定义规则、自定义 CSS 和 Agent Bridge 本地开关都会恢复为默认状态。',
+      confirmLabel: '恢复默认',
+      tone: 'danger'
+    })
+    if (!confirmed) return
     const defaults = defaultSettings()
     state.settings = defaults
     const syncDefaults = normalizeSettings({
@@ -787,6 +1003,13 @@
     value => applyCustomCss(value || '')
   )
 
+  watch(
+    () => state.settings.agentBridgeEnabled,
+    enabled => {
+      if (!enabled) state.settings.agentBridgeAllowAllNetworkTargets = false
+    }
+  )
+
   onMounted(async () => {
     version.value = chrome.runtime.getManifest?.()?.version || ''
     theme.value = await getStoredTheme()
@@ -800,6 +1023,12 @@
     font-size: 14px;
     line-height: 1.5;
     padding-top: 152px;
+  }
+
+  @media (max-width: 760px) {
+    body {
+      padding-top: 0;
+    }
   }
 </style>
 
@@ -954,6 +1183,75 @@
     }
   }
 
+  .confirm-backdrop {
+    align-items: center;
+    background: rgba(15, 23, 42, 0.42);
+    display: flex;
+    inset: 0;
+    justify-content: center;
+    padding: 24px;
+    position: fixed;
+    z-index: 70;
+  }
+
+  .confirm-modal {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: 0 24px 70px rgba(15, 23, 42, 0.26);
+    max-width: 460px;
+    outline: none;
+    padding: 22px;
+    width: min(100%, 460px);
+
+    &.is-warning {
+      border-color: rgba(180, 83, 9, 0.34);
+    }
+
+    &.is-danger {
+      border-color: rgba(185, 28, 28, 0.34);
+    }
+  }
+
+  .confirm-title {
+    color: var(--text);
+    font-size: 17px;
+    font-weight: 700;
+    line-height: 1.35;
+  }
+
+  .confirm-message {
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.65;
+    margin-top: 10px;
+  }
+
+  .confirm-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 20px;
+
+    button {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 14px;
+      min-height: 36px;
+      padding: 0 14px;
+
+      &.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #ffffff;
+        font-weight: 600;
+      }
+    }
+  }
+
   // panel：去 box-shadow，仅 hairline
   .panel {
     background: var(--panel);
@@ -1047,6 +1345,11 @@
       border-color: rgba(180, 83, 9, 0.42);
       box-shadow: 0 14px 30px rgba(180, 83, 9, 0.1);
     }
+
+    &.has-network-override {
+      background: linear-gradient(90deg, rgba(245, 158, 11, 0.13), transparent 58%), var(--panel);
+      border-color: rgba(180, 83, 9, 0.42);
+    }
   }
 
   .agent-bridge-main {
@@ -1127,6 +1430,12 @@
       border-color: rgba(180, 83, 9, 0.26);
       color: #92400e;
     }
+
+    &.warning {
+      background: rgba(245, 158, 11, 0.14);
+      border-color: rgba(180, 83, 9, 0.34);
+      color: #92400e;
+    }
   }
 
   .agent-bridge-control {
@@ -1139,6 +1448,13 @@
     padding: 16px 24px 18px;
   }
 
+  .agent-bridge-toggle-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+  }
+
   :global(:root[data-theme='dark']) .agent-bridge-control {
     background: rgba(15, 20, 25, 0.28);
   }
@@ -1147,10 +1463,25 @@
     :global(:root:not([data-theme='light'])) .agent-bridge-control {
       background: rgba(15, 20, 25, 0.28);
     }
+
+    :global(:root:not([data-theme='light'])) .agent-bridge-state.pending,
+    :global(:root:not([data-theme='light'])) .agent-bridge-state.warning,
+    :global(:root:not([data-theme='light'])) .agent-bridge-network-toggle strong,
+    :global(:root:not([data-theme='light'])) .agent-bridge-facts .warning {
+      color: #fbbf24;
+    }
+
+    :global(:root:not([data-theme='light'])) .agent-bridge-network-toggle small {
+      color: #fcd34d;
+    }
+
+    :global(:root:not([data-theme='light'])) .agent-bridge-facts .warning svg {
+      color: #f59e0b;
+    }
   }
 
   .agent-bridge-toggle {
-    align-items: center;
+    align-items: flex-start;
     color: var(--text);
     cursor: pointer;
     display: flex;
@@ -1177,6 +1508,34 @@
     }
   }
 
+  .agent-bridge-network-toggle {
+    align-items: flex-start;
+
+    strong {
+      color: #92400e;
+    }
+
+    small {
+      color: #a16207;
+      max-width: 560px;
+    }
+  }
+
+  :global(:root[data-theme='dark']) .agent-bridge-state.pending,
+  :global(:root[data-theme='dark']) .agent-bridge-state.warning,
+  :global(:root[data-theme='dark']) .agent-bridge-network-toggle strong,
+  :global(:root[data-theme='dark']) .agent-bridge-facts .warning {
+    color: #fbbf24;
+  }
+
+  :global(:root[data-theme='dark']) .agent-bridge-network-toggle small {
+    color: #fcd34d;
+  }
+
+  :global(:root[data-theme='dark']) .agent-bridge-facts .warning svg {
+    color: #f59e0b;
+  }
+
   .agent-bridge-facts {
     display: flex;
     flex-wrap: wrap;
@@ -1199,6 +1558,16 @@
 
     svg {
       color: var(--accent);
+    }
+
+    .warning {
+      background: rgba(245, 158, 11, 0.12);
+      border-color: rgba(180, 83, 9, 0.26);
+      color: #92400e;
+    }
+
+    .warning svg {
+      color: #b45309;
     }
   }
 
@@ -1403,6 +1772,10 @@
   }
 
   @media (max-width: 760px) {
+    .settings-header {
+      position: static;
+    }
+
     .settings-shell {
       padding: 16px;
     }
@@ -1419,10 +1792,31 @@
       padding: 12px 16px;
     }
 
+    .header-actions {
+      display: grid;
+      gap: 6px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      width: 100%;
+
+      button {
+        justify-content: center;
+        min-height: 36px;
+      }
+
+      button.primary {
+        grid-column: 1 / -1;
+        order: -1;
+      }
+    }
+
     .agent-bridge-main,
     .agent-bridge-control {
       align-items: stretch;
       flex-direction: column;
+    }
+
+    .agent-bridge-toggle-stack {
+      width: 100%;
     }
 
     .agent-bridge-state {
@@ -1431,6 +1825,19 @@
 
     .agent-bridge-facts {
       justify-content: flex-start;
+    }
+
+    .confirm-backdrop {
+      align-items: flex-end;
+      padding: 16px;
+    }
+
+    .confirm-actions {
+      flex-direction: column-reverse;
+
+      button {
+        width: 100%;
+      }
     }
 
     .msg {

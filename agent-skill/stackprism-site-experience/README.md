@@ -8,10 +8,17 @@ Paths in this package are relative to the StackPrism repository root. If an agen
 
 ## Scripts
 
+- `scripts/capture-site.mjs`: preferred one-shot capture client. It starts the JavaScript bridge, keeps stdin open, creates the capture, polls for the completed profile, writes the profile JSON, and optionally writes the screenshot image.
 - `scripts/stackprism-bridge.mjs`: JavaScript loopback bridge, preferred.
 - `scripts/stackprism_bridge.py`: Python standard-library fallback.
 
 Both scripts print a single ready JSON line to stdout after the HTTP server is bound. Logs and startup errors go to stderr.
+
+Use `capture-site.mjs` for ordinary agent work. Use `stackprism-bridge.mjs` or the Python fallback directly only for protocol debugging or custom orchestration.
+
+`capture-site.mjs` bounds each bridge API request with `--request-timeout-ms`, defaulting to 30000 ms, so a stalled local bridge fails explicitly instead of hanging the calling agent.
+
+The bridge page opened in the browser becomes a result workbench after completion: target URL, screenshot preview, enlarged screenshot preview, screenshot download/copy, one-click Markdown summary, and grouped profile content cards. The page reads only the status preview with its one-capture `bridgeToken`; raw `/profile` still requires the API token.
 
 When selecting a non-default browser or profile, keep the opener executable and its arguments separate: `STACKPRISM_BROWSER_OPEN_COMMAND` is only the executable or platform opener, while `STACKPRISM_BROWSER_OPEN_ARGS_JSON` is a JSON string array of opener/profile arguments. The bridge URL is appended by the script as the final argv item.
 

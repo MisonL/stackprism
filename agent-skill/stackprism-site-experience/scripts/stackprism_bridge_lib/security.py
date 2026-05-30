@@ -45,10 +45,10 @@ def bad_shell_error(handler):
     if handler.headers.get("Host") != urlparse(handler.server.store.base_url).netloc:
         return 400, "INVALID_REQUEST", "Host is not allowed."
     path = handler.path
-    if not path.startswith("/") or path.startswith("//") or "%2f" in path.lower() or "%5c" in path.lower():
+    if not path.startswith("/") or path.startswith("//"):
         return 400, "INVALID_REQUEST", "Only origin-form request targets are allowed."
     raw_path, _, raw_query = path.partition("?")
-    if "%2e" in path.lower():
+    if any(value in path.lower() for value in ("%2e", "%2f", "%5c")) or "\\" in path:
         return 400, "INVALID_REQUEST", "Encoded path separators or dot segments are not allowed."
     if raw_path != "/" and any(segment in {"", ".", ".."} for segment in raw_path.split("/")[1:]):
         return 400, "INVALID_REQUEST", "Ambiguous path segments are not allowed."

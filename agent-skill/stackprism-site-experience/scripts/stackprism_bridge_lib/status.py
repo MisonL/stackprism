@@ -1,5 +1,6 @@
 import re
 
+from .profile_summary import profile_preview_summary
 from .protocol import PROTOCOL_VERSION, is_known_bridge_error_code, redact_url
 
 FINAL_STATES = {"completed", "failed", "cancelled", "expired"}
@@ -40,6 +41,9 @@ def public_preview(capture):
     screenshot = screenshot_preview(capture.get("profile")) if capture["status"] == "completed" else None
     if screenshot:
         preview["screenshot"] = screenshot
+    summary = profile_preview_summary(capture, screenshot)
+    if summary:
+        preview.update(summary)
     return preview
 
 

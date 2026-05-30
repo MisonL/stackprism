@@ -63,7 +63,7 @@ def open_browser(url, env=os.environ):
     except PermissionError:
         return False, {"reason": "permission_denied"}
     except subprocess.TimeoutExpired:
-        return False, {"reason": "timeout"}
+        return False, {"reason": "open_timeout"}
     except Exception as exc:
         return False, {"reason": "spawn_failed", "error": str(exc)}
     if completed.returncode != 0:

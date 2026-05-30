@@ -46,7 +46,13 @@ export const rejectBadRequestShell = (req, res, baseUrl) => {
     fail(res, 400, 'INVALID_REQUEST', 'Query string is not allowed for this endpoint.')
     return true
   }
-  if (req.headers['content-encoding'] && req.headers['content-encoding'] !== 'identity') {
+  const contentLength = req.headers['content-length']
+  if (contentLength && !/^\d+$/.test(String(contentLength))) {
+    fail(res, 400, 'INVALID_REQUEST', 'Content-Length is invalid.')
+    return true
+  }
+  const contentEncoding = req.headers['content-encoding']
+  if (contentEncoding && String(contentEncoding).toLowerCase() !== 'identity') {
     fail(res, 415, 'UNSUPPORTED_MEDIA_TYPE', 'Content-Encoding is not supported.')
     return true
   }

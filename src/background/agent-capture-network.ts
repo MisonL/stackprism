@@ -16,6 +16,10 @@ let networkObserverRegistered = false
 let networkObserverTarget: unknown = null
 const tabNetworkEvidence = new Map<number, AgentCaptureNetworkEvidence>()
 
+export interface AgentCaptureNetworkPolicy {
+  allowAllNetworkTargets?: boolean
+}
+
 const isMainFrameResponse = (details: chrome.webRequest.WebResponseCacheDetails): boolean =>
   details.tabId >= 0 && details.type === 'main_frame' && Boolean(normalizeComparableUrl(details.url))
 
@@ -92,8 +96,12 @@ export const waitForAgentCaptureNetworkEvidence = async (state: AgentCaptureStat
   return (await getAgentCaptureState(state.captureId)) || state
 }
 
-export const validateAgentCaptureNetwork = (state: AgentCaptureState, request: AgentCaptureRequest): AgentBridgeError | null => {
-  if (request.options.allowPrivateNetworkTarget) return null
+export const validateAgentCaptureNetwork = (
+  state: AgentCaptureState,
+  request: AgentCaptureRequest,
+  policy: AgentCaptureNetworkPolicy = {}
+): AgentBridgeError | null => {
+  if (request.options.allowPrivateNetworkTarget || policy.allowAllNetworkTargets) return null
   if (!isNetworkObserverActive()) return null
   if (!isCurrentNetworkEvidence(state)) {
     return networkBlockedError({ reason: 'target_network_address_unverified' })
