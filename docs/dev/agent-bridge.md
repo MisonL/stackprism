@@ -108,12 +108,12 @@ Agent Bridge 输出 schema 为 `stackprism.site_experience_profile.v1`。当前 
 STACKPRISM_BROWSER_SMOKE_CDP_PORT=9661 node tests/agent-bridge-browser-smoke.mjs
 ```
 
-当前默认成功路径使用本地 `tests/fixtures/site-experience-fixture.html`，并在 capture request 中显式设置 `allowPrivateNetworkTarget = true`。默认路径不再依赖 `https://example.com`，因为当前本机 DNS-proxy 环境可能把该域名解析到 `198.18.*`，这会按 private-network policy 在创建阶段 fail closed。
+当前默认成功路径使用本地 `tests/fixtures/site-experience-fixture.html`，并在 capture request 中显式设置 `allowPrivateNetworkTarget = true`。默认路径不再依赖 `https://example.com`，因为外部公网目标会受到当前网络、代理、DNS 和站点可用性影响。公网域名经本机代理或 TUN fake-IP 解析/连接到 `198.18.0.0/15` 时，默认策略允许采集；直接私网 IP、`localhost`、RFC1918、link-local、真实内网和其他 special-use 地址仍 fail closed，除非显式设置 `allowPrivateNetworkTarget = true`。
 
 smoke 结果按三类理解：
 
 - 默认 fixture 成功路径：证明扩展加载、opt-in、bridge handshake、target capture、profile transfer、profile endpoint、隐私脱敏和 cleanup 主链路。
-- 显式 public complex target：例如 `STACKPRISM_BROWSER_SMOKE_SCENARIO=public-complex-target STACKPRISM_BROWSER_SMOKE_TARGET_URL=https://www.wikipedia.org/ ...`。如果 resolver 返回 `198.18.*` 并使用 `allowPrivateNetworkTarget = true`，它只证明当前 DNS-proxy 环境下的复杂页面内容采集，不证明默认 no-private-network policy 接受 resolver-rewritten public hostname。
+- 显式 public complex target：例如 `STACKPRISM_BROWSER_SMOKE_SCENARIO=public-complex-target STACKPRISM_BROWSER_SMOKE_TARGET_URL=https://www.wikipedia.org/ ...`。如果 resolver 或 Chrome network evidence 返回 `198.18.*`，默认策略会按本机代理/TUN fake-IP 场景允许该公网 hostname；这不等价于允许直接私网或真实内网目标。
 - private-network policy 场景：`private-target-blocked`、DNS/private final URL、bridge self-target 等场景证明 fail-closed 策略，不是浏览器级 SSRF 防火墙，也不保证导航前零网络触达。
 
 ## Live Gate 边界

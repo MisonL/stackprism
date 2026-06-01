@@ -22,7 +22,8 @@ Do not use this skill for backend-only tasks, generic web search, SEO content ex
 - StackPrism Agent Bridge is enabled in the extension settings for that local browser profile.
 - The target URL is `http:` or `https:`.
 - Local development targets require `"allowPrivateNetworkTarget": true`.
-- If the user has enabled the extension's high-risk "allow all network targets" setting, still pass `--allow-private-network` for local or DNS-proxy targets; the extension setting affects the browser-observed final target gate, while the helper's create-stage URL policy remains explicit per capture.
+- Public hostnames routed through common local proxy/TUN fake-IP ranges such as `198.18.0.0/15` are supported by default. Direct private IPs, `localhost`, RFC1918, link-local, and other special-use targets still require `"allowPrivateNetworkTarget": true`.
+- If the user has enabled the extension's high-risk "allow all network targets" setting, still pass `--allow-private-network` for local development, direct private IP, or real intranet targets; the extension setting affects the browser-observed final target gate, while the helper's create-stage URL policy remains explicit per capture.
 
 ## Preferred Capture Command
 
@@ -45,7 +46,7 @@ Each bridge API request has a bounded timeout. The default is 30000 ms; use `--r
 
 The opened bridge page is also a local result workbench. After completion it shows the target URL, screenshot preview, click-to-enlarge preview, screenshot download/copy buttons, a one-click Markdown summary, and grouped profile content cards. That page only uses the bridge-token status preview; it cannot read raw `/profile`. For programmatic use, prefer the helper output or the API-token profile endpoint.
 
-If the helper exits with `PRIVATE_NETWORK_TARGET_BLOCKED` in a known DNS-proxy or local-development environment, run a second fresh helper process with `--allow-private-network` and record that this was a controlled override. Do not reuse the first bridge URL, capture id, session, or token.
+If the helper exits with `PRIVATE_NETWORK_TARGET_BLOCKED` for a local development, direct private IP, or real intranet target, run a second fresh helper process with `--allow-private-network` and record that this was a controlled override. Do not reuse the first bridge URL, capture id, session, or token. Do not add `--allow-private-network` just because a public hostname is routed through `198.18.0.0/15`; that proxy/TUN case is allowed by default.
 
 If the helper exits with `CAPTURE_BUSY`, wait a few seconds, stop any bridge child process from that attempt, and run one fresh helper process. Do not keep polling an old capture after a terminal or stale status.
 
@@ -110,7 +111,7 @@ Call `POST /v1/captures` with `Authorization: Bearer {apiToken}`:
 }
 ```
 
-Use the real target URL for the task. Do not treat `https://example.com` as the default smoke target; in some local DNS-proxy environments public hostnames can resolve to `198.18.*` and correctly fail closed unless private-network targets are explicitly allowed for a controlled test.
+Use the real target URL for the task. Do not treat `https://example.com` as the default smoke target. Public hostnames routed through `198.18.*` by local proxy/TUN software are accepted by default, but direct private IPs, `localhost`, RFC1918, link-local, and real intranet targets remain fail-closed unless private-network targets are explicitly allowed for a controlled test.
 
 Then poll `GET /v1/captures/{id}` and read `GET /v1/captures/{id}/profile` when status is `completed`.
 
