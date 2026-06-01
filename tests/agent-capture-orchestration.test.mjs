@@ -1503,7 +1503,7 @@ test('agent capture stops before detection when bridge blocks final URL', async 
       sessionId,
       nonce,
       bridgeOrigin: 'http://127.0.0.1:17370',
-      request: baseRequest,
+      request: { ...baseRequest, options: { ...baseRequest.options, targetMode: 'new_tab' } },
       capabilities: {
         agentBridge: true,
         siteExperienceProfileV1: true,
@@ -1763,7 +1763,7 @@ test('agent capture can be explicitly allowed to use all network targets from lo
       request: {
         ...baseRequest,
         include: ['tech'],
-        options: { ...baseRequest.options, forceRefresh: false }
+        options: { ...baseRequest.options, forceRefresh: false, targetMode: 'new_tab' }
       },
       capabilities: { ...fullCapabilities }
     },
@@ -2007,7 +2007,6 @@ test('active tab mode and bridge guards fail closed', async () => {
 
 test('target tab resolution keeps query strings in reuse and active-tab matching', async () => {
   const env = makeChrome()
-  env.tabs.find(tab => tab.id === 2).url = 'https://example.com/app?view=two'
   globalThis.chrome = env.chrome
   const [{ validateAgentCaptureRequest }, { resolveTargetTab }] = await Promise.all([
     loadTsModule('src/background/agent-capture-request.ts'),
@@ -2019,8 +2018,15 @@ test('target tab resolution keeps query strings in reuse and active-tab matching
 
   const reused = await resolveTargetTab(request, 1)
   assert.equal(reused.ok, true)
-  assert.equal(reused.createdByCapture, true)
+  assert.equal(reused.createdByCapture, false)
+  assert.equal(reused.tab.id, 2)
   assert.equal(reused.tab.url, 'https://example.com/app?view=one')
+
+  env.tabs.find(tab => tab.id === 2).url = 'https://example.com/app?view=two'
+  const newTab = await resolveTargetTab(request, 1)
+  assert.equal(newTab.ok, true)
+  assert.equal(newTab.createdByCapture, true)
+  assert.equal(newTab.tab.url, 'https://example.com/app?view=one')
 
   env.storage['agent-active-tab:1'] = {
     tabId: 2,

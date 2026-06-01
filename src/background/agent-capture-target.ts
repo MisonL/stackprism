@@ -41,7 +41,7 @@ export const resolveTargetTab = async (request: AgentCaptureRequest, bridgeWindo
   if (request.options.targetMode === 'active_tab') {
     return resolveActiveTargetTab(request, bridgeWindowId)
   }
-  if (request.options.targetMode === 'reuse_or_new_tab' && request.options.allowPrivateNetworkTarget) {
+  if (request.options.targetMode === 'reuse_or_new_tab') {
     const reusable = await findReusableTab(request.url)
     if (reusable) return { ok: true, tab: reusable, createdByCapture: false }
   }
