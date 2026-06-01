@@ -108,6 +108,7 @@ const createBridgeScriptHarness = async () => {
     'progressBar',
     'bridgeCard',
     'targetUrl',
+    'targetHelper',
     'screenshotFrame',
     'targetScreenshot',
     'screenshotMeta',
@@ -124,6 +125,10 @@ const createBridgeScriptHarness = async () => {
     'modalClose',
     'modalDownload',
     'modalCopyScreenshot',
+    'screenshotTileValue',
+    'screenshotEmpty',
+    'screenshotStateBadge',
+    'toggleSteps',
     'stackprism-agent-bridge-config'
   ]
   const document = {
@@ -343,9 +348,17 @@ test('bridge page script supports screenshot actions and modal focus loop', asyn
 
   assert.equal(elements.bridgeCard.dataset.status, 'completed')
   assert.equal(elements.targetUrl.textContent, 'https://example.test/page')
+  assert.equal(elements.targetUrl.title, 'https://example.test/page')
+  assert.equal(elements.targetHelper.textContent, '已生成 Agent 可读摘要，可复制给本机 Coding Agent 使用。')
   assert.equal(elements.screenshotDownload.disabled, false)
   assert.equal(elements.copyScreenshot.disabled, false)
   assert.equal(elements.copyAllInfo.disabled, false)
+  assert.equal(elements.screenshotTileValue.textContent, '截图可用')
+  assert.equal(elements.screenshotStateBadge.textContent, '截图可用')
+  assert.equal(elements.screenshotStateBadge.dataset.state, 'ready')
+  assert.equal(elements.bridgeCard.dataset.stepsOpen, 'false')
+  assert.equal(elements.toggleSteps.textContent, '展开步骤')
+  assert.equal(elements.toggleSteps['aria-expanded'], 'false')
   assert.equal(elements.targetScreenshot.alt, '目标页面截图预览')
   assert.equal(elements.modalScreenshot.alt, '目标页面截图放大预览')
   assert.equal(elements.profileContentSection.hidden, false)
@@ -353,9 +366,15 @@ test('bridge page script supports screenshot actions and modal focus loop', asyn
   assert.equal(steps.at(-1).classList.contains('done'), true)
   assert.equal(steps.at(-1)['aria-current'], undefined)
 
+  elements.toggleSteps.click()
+  assert.equal(elements.bridgeCard.dataset.stepsOpen, 'true')
+  assert.equal(elements.toggleSteps.textContent, '收起步骤')
+  assert.equal(elements.toggleSteps['aria-expanded'], 'true')
+
   await elements.copyAllInfo.click()
   assert.deepEqual(writtenText, ['StackPrism profile summary'])
   assert.equal(elements.copyStatus.textContent, '已复制全部信息。')
+  assert.equal(elements.copyAllInfo.textContent, '已复制')
 
   elements.screenshotDownload.click()
   const downloadLink = document.body.children.at(-1)
@@ -401,6 +420,10 @@ test('bridge page script supports screenshot actions and modal focus loop', asyn
   assert.equal(elements.screenshotFrame.disabled, true)
   assert.equal(elements.targetScreenshot.alt, '')
   assert.equal(elements.modalScreenshot.alt, '')
+  assert.equal(elements.screenshotTileValue.textContent, '截图失败')
+  assert.equal(elements.screenshotStateBadge.textContent, '截图失败')
+  assert.equal(elements.screenshotStateBadge.dataset.state, 'failed')
+  assert.equal(elements.screenshotEmpty.textContent, '截图预览无法加载')
   document.listeners.keydown({ key: 'Escape' })
   assert.equal(elements.screenshotModal.dataset.open, 'false')
   assert.equal(document.activeElement, elements.bridgeCard)
@@ -594,7 +617,7 @@ test('bridge page renders bridge token once with hardened headers', async () => 
     assert.match(html, /meta name="stackprism-agent-bridge" content="1"/)
     assert.match(html, /id="bridgeCard" class="bridge-card" data-status="waiting_extension" aria-labelledby="bridge-title" tabindex="-1"/)
     assert.match(html, /id="progressBar"/)
-    assert.match(html, /id="targetUrl"/)
+    assert.match(html, /id="targetUrl" class="target-url" title=""/)
     assert.match(html, /id="targetScreenshot"/)
     assert.match(html, /id="targetScreenshot" alt=""/)
     assert.match(html, /id="screenshotMeta"/)
@@ -603,8 +626,15 @@ test('bridge page renders bridge token once with hardened headers', async () => 
     assert.match(html, /id="copyAllInfo"/)
     assert.match(html, /id="copyStatus"/)
     assert.match(html, /id="modalCopyStatus"/)
+    assert.match(html, /id="screenshotTileValue"/)
+    assert.match(html, /id="screenshotStateBadge" class="state-chip" data-state="pending"/)
+    assert.match(html, /id="screenshotEmpty"/)
     assert.match(html, /id="stepSummary" class="step-summary" role="status" aria-live="polite"/)
-    assert.match(html, /<ol class="steps" aria-label="采集步骤" role="list">/)
+    assert.match(
+      html,
+      /id="toggleSteps" class="flow-toggle" type="button" aria-controls="captureSteps" aria-expanded="false"/,
+    )
+    assert.match(html, /<ol id="captureSteps" class="steps" aria-label="采集步骤" role="list">/)
     assert.match(html, /data-phase="bridge_connected" aria-current="step"/)
     assert.match(html, /id="profileContentSection"/)
     assert.match(html, /id="profileContentGrid"/)
@@ -617,6 +647,7 @@ test('bridge page renders bridge token once with hardened headers', async () => 
     assert.match(html, /navigator\.clipboard\.writeText/)
     assert.match(html, /new ClipboardItem/)
     assert.match(html, /showCopyStatus\('已复制全部信息。'\)/)
+    assert.match(html, /flashCopyButton\('已复制'\)/)
     assert.match(html, /const clipboardScreenshotBlob=async/)
     assert.match(html, /createImageBitmap\(blob\)/)
     assert.match(html, /'image\/png':blob/)
@@ -630,7 +661,35 @@ test('bridge page renders bridge token once with hardened headers', async () => 
     assert.match(html, /el\.targetScreenshot\.alt=''/)
     assert.match(html, /color-scheme:light dark/)
     assert.match(html, /@media \(prefers-color-scheme:dark\)/)
+    assert.match(html, /class="result-grid"/)
+    assert.match(html, /class="summary-grid"/)
+    assert.match(html, /class="screenshot-panel"/)
+    assert.match(html, /border-radius:16px/)
+    assert.match(html, /grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/)
+    assert.match(html, /--sp-neutral-line:#e5e9ee/)
+    assert.match(html, /grid-template-columns:minmax\(0,1\.22fr\) minmax\(320px,\.82fr\)/)
+    assert.match(html, /class="summary-handoff" aria-label="摘要包含"/)
+    assert.match(html, /摘要包含/)
+    assert.match(html, /技术栈/)
+    assert.match(html, /首屏结构/)
+    assert.match(html, /height:clamp\(190px,14vw,230px\)/)
+    assert.match(html, /object-fit:cover/)
+    assert.match(html, /object-position:top center/)
+    assert.match(html, /-webkit-line-clamp:2/)
+    assert.match(html, /\.bridge-header\{position:relative;display:block/)
+    assert.match(html, /\.summary-handoff\{display:none\}/)
+    assert.match(html, /class="target-actions"/)
+    assert.match(html, /class="preview-button primary target-copy-button"/)
+    assert.match(html, /class="flow-panel"/)
+    assert.match(html, /grid-template-columns:repeat\(8,minmax\(0,1fr\)\)/)
     assert.match(html, /grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/)
+    assert.match(html, /\.bridge-card\[data-status="completed"\] \.status-panel\{display:none\}/)
+    assert.match(html, /\.bridge-card\[data-status="completed"\]:not\(\[data-steps-open="true"\]\) \.steps\{display:none\}/)
+    assert.match(html, /\.state-chip\[data-state="ready"\]/)
+    assert.match(html, /setScreenshotState\('截图可用','ready'\)/)
+    assert.match(html, /setStepsOpen\(false\)/)
+    assert.match(html, /addEventListener\('click',\(\)=>setStepsOpen\(!stepsOpen,true\)\)/)
+    assert.match(html, /\.preview-button:disabled,.modal-close:disabled\{cursor:not-allowed;opacity:1;background:#f7fbfa/)
     assert.match(html, /setCopyStatus\(modalOpen\(\)\?el\.modalCopyStatus:el\.copyStatus,value,type\)/)
     assert.match(html, /const restore=el\.screenshotFrame\.disabled\?el\.bridgeCard:el\.screenshotFrame/)
     assert.match(html, /if\(current\|\|failedCurrent\)step\.setAttribute\('aria-current','step'\)/)
@@ -642,14 +701,23 @@ test('bridge page renders bridge token once with hardened headers', async () => 
     assert.match(html, /color:#fca5a5/)
     assert.match(html, /color:#fbbf24/)
     assert.match(html, /disconnected:'连接已关闭'/)
-    assert.match(html, /config\.targetUrl\|\|'等待读取目标网址'/)
+    assert.match(html, /const targetText=preview\.targetUrl\|\|config\.targetUrl\|\|'等待读取目标网址'/)
+    assert.match(html, /el\.targetUrl\.title=targetText/)
     assert.match(html, /本机 bridge 服务已关闭，当前页面无法继续读取状态。/)
     assert.doesNotMatch(html, /Bridge status unavailable/)
     assert.match(html, /data-phase="profiling_experience"/)
     assert.match(html, /本机通道/)
-    assert.match(html, /正在连接本机 Agent 与当前浏览器 profile/)
+    assert.match(html, /连接本机 Agent 与当前浏览器 profile，展示本次采集结果。/)
+    assert.match(html, /采集目标/)
+    assert.match(html, /id="targetHelper" class="target-helper"/)
+    assert.match(html, /采集完成后可复制给本机 Coding Agent 使用。/)
+    assert.match(html, /已生成 Agent 可读摘要，可复制给本机 Coding Agent 使用。/)
+    assert.match(html, /面向复刻任务整理技术栈、视觉结构、交互路径与资产线索。/)
+    assert.match(html, /复刻重点/)
+    assert.match(html, /先看 Agent 可读内容/)
     assert.match(html, /本页只服务当前一次采集/)
-    assert.match(html, /Profile 内容/)
+    assert.match(html, /摘要不含 token、nonce、raw JSON 或截图 data URL/)
+    assert.match(html, /Agent 可读内容/)
     assert.match(html, /完整 raw profile 仍需 API token 读取/)
     assert.match(html, new RegExp(`id="stackprism-agent-bridge-config" type="application/json" nonce="${cspNonce}"`))
     assert.match(html, new RegExp(`<style nonce="${cspNonce}"`))
