@@ -8,7 +8,7 @@ import {
 } from './agent-capture-state'
 import { normalizeComparableUrl } from './agent-capture-request'
 import type { AgentBridgeError, AgentCaptureRequest } from '@/types/agent-bridge'
-import { isPrivateNetworkAddress } from '@/utils/network-address-policy'
+import { isPrivateNetworkAddress, isProxyReservedNetworkAddress } from '@/utils/network-address-policy'
 
 const TARGET_NETWORK_WAIT_MS = 1000
 const TARGET_NETWORK_POLL_MS = 25
@@ -76,6 +76,21 @@ const isCurrentNetworkEvidence = (state: AgentCaptureState): boolean => {
   return Boolean(finalUrl && state.targetNetwork && normalizeComparableUrl(state.targetNetwork.url) === finalUrl)
 }
 
+const isIpLiteral = (value: string): boolean => {
+  const host = value.replace(/^\[|\]$/g, '')
+  return /^(?:\d{1,3}\.){3}\d{1,3}$/.test(host) || host.includes(':')
+}
+
+const canUseProxyReservedAddress = (state: AgentCaptureState, ip: string): boolean => {
+  if (!isProxyReservedNetworkAddress(ip)) return false
+  try {
+    const finalUrl = new URL(state.finalUrl || '')
+    return !isIpLiteral(finalUrl.hostname) && !isPrivateNetworkAddress(finalUrl.hostname)
+  } catch {
+    return false
+  }
+}
+
 const wait = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
 
 export const waitForAgentCaptureNetworkEvidence = async (state: AgentCaptureState): Promise<AgentCaptureState> => {
@@ -110,7 +125,7 @@ export const validateAgentCaptureNetwork = (
   if (!targetNetwork || targetNetwork.fromCache || !targetNetwork.ip) {
     return networkBlockedError({ reason: 'target_network_address_unverified' })
   }
-  if (isPrivateNetworkAddress(targetNetwork.ip)) {
+  if (isPrivateNetworkAddress(targetNetwork.ip) && !canUseProxyReservedAddress(state, targetNetwork.ip)) {
     return networkBlockedError({ reason: 'private_network_address', address: targetNetwork.ip })
   }
   return null

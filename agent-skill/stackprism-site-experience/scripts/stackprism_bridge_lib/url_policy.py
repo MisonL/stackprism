@@ -9,13 +9,8 @@ from .protocol import PROTOCOL_VERSION
 
 REQUEST_KEYS = {"url", "mode", "waitMs", "include", "viewports", "options"}
 OPTION_KEYS = {
-    "forceRefresh",
-    "captureScreenshotMetadata",
-    "captureScreenshot",
-    "keepTabOpen",
-    "allowPrivateNetworkTarget",
-    "targetMode",
-    "maxResourceUrls",
+    "forceRefresh", "captureScreenshotMetadata", "captureScreenshot", "keepTabOpen",
+    "allowPrivateNetworkTarget", "targetMode", "maxResourceUrls",
 }
 BOOLEAN_OPTION_KEYS = {"forceRefresh", "captureScreenshotMetadata", "captureScreenshot", "keepTabOpen", "allowPrivateNetworkTarget"}
 INCLUDE_ORDER = ["tech", "visual", "layout", "components", "interaction", "ux", "assets"]
@@ -25,35 +20,15 @@ _DNS_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="stackprism
 PRIVATE_IP_NETWORKS = tuple(
     ipaddress.ip_network(network)
     for network in (
-        "0.0.0.0/8",
-        "10.0.0.0/8",
-        "100.64.0.0/10",
-        "127.0.0.0/8",
-        "169.254.0.0/16",
-        "172.16.0.0/12",
-        "192.0.0.0/24",
-        "192.0.2.0/24",
-        "192.88.99.0/24",
-        "192.168.0.0/16",
-        "198.18.0.0/15",
-        "198.51.100.0/24",
-        "203.0.113.0/24",
-        "224.0.0.0/4",
-        "240.0.0.0/4",
-        "255.255.255.255/32",
-        "::/128",
-        "::1/128",
-        "64:ff9b:1::/48",
-        "100::/64",
-        "2001::/23",
-        "2001:db8::/32",
-        "2002::/16",
-        "3fff::/20",
-        "fc00::/7",
-        "fe80::/10",
-        "ff00::/8",
+        "0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8",
+        "169.254.0.0/16", "172.16.0.0/12", "192.0.0.0/24", "192.0.2.0/24",
+        "192.88.99.0/24", "192.168.0.0/16", "198.18.0.0/15", "198.51.100.0/24",
+        "203.0.113.0/24", "224.0.0.0/4", "240.0.0.0/4", "255.255.255.255/32",
+        "::/128", "::1/128", "64:ff9b:1::/48", "100::/64", "2001::/23", "2001:db8::/32",
+        "2002::/16", "3fff::/20", "fc00::/7", "fe80::/10", "ff00::/8",
     )
 )
+PROXY_RESERVED_IP_NETWORKS = tuple(ipaddress.ip_network(network) for network in ("198.18.0.0/15",))
 PUBLIC_IP_EXCEPTIONS = tuple(
     ipaddress.ip_network(network)
     for network in (
@@ -80,9 +55,17 @@ def is_private_host(hostname):
         address = ipaddress.ip_address(hostname.strip("[]"))
         if getattr(address, "ipv4_mapped", None):
             address = address.ipv4_mapped
-        return any(address in network for network in PRIVATE_IP_NETWORKS) and not any(
-            address in network for network in PUBLIC_IP_EXCEPTIONS
-        )
+        return any(address in network for network in PRIVATE_IP_NETWORKS) and not any(address in network for network in PUBLIC_IP_EXCEPTIONS)
+    except ValueError:
+        return False
+
+
+def is_proxy_reserved_host(hostname):
+    try:
+        address = ipaddress.ip_address(hostname.strip("[]"))
+        if getattr(address, "ipv4_mapped", None):
+            address = address.ipv4_mapped
+        return any(address in network for network in PROXY_RESERVED_IP_NETWORKS)
     except ValueError:
         return False
 
@@ -113,7 +96,7 @@ def validate_dns_policy(hostname, allow_private_network_target, resolver):
         return "TARGET_DNS_LOOKUP_FAILED", {"reason": "dns_lookup_failed"}
     if not isinstance(addresses, list) or not addresses:
         return "TARGET_DNS_LOOKUP_FAILED", {"reason": "dns_lookup_failed"}
-    if any(is_private_host(str(address)) for address in addresses):
+    if any(is_private_host(str(address)) and not is_proxy_reserved_host(str(address)) for address in addresses):
         return "PRIVATE_NETWORK_TARGET_BLOCKED", {"reason": "private_network_address"}
     return None, None
 
@@ -149,15 +132,8 @@ def normalize_options(options):
         return None, "Capture targetMode is invalid."
     if not is_strict_int(max_resource_urls) or not 0 <= max_resource_urls <= 1000:
         return None, "Capture maxResourceUrls is invalid."
-    return {
-        "forceRefresh": options.get("forceRefresh") is True,
-        "captureScreenshotMetadata": options.get("captureScreenshotMetadata") is True,
-        "captureScreenshot": options.get("captureScreenshot") is True,
-        "keepTabOpen": options.get("keepTabOpen") is True,
-        "allowPrivateNetworkTarget": options.get("allowPrivateNetworkTarget") is True,
-        "targetMode": target_mode,
-        "maxResourceUrls": max_resource_urls,
-    }, None
+    normalized = {key: options.get(key) is True for key in BOOLEAN_OPTION_KEYS}
+    return {**normalized, "targetMode": target_mode, "maxResourceUrls": max_resource_urls}, None
 
 
 def invalid_request(message):
@@ -279,7 +255,7 @@ def validate_final_url(value, bridge_origin, request):
     return None, "FINAL_URL_BLOCKED", details or {"reason": reason}
 
 
-def validate_target_network_address(value, request, from_cache=False):
+def validate_target_network_address(value, request, from_cache=False, final_url=None):
     if request.get("options", {}).get("allowPrivateNetworkTarget") is True:
         return None, None
     if from_cache or value is None:
@@ -293,6 +269,13 @@ def validate_target_network_address(value, request, from_cache=False):
         ipaddress.ip_address(address)
     except ValueError:
         return "INVALID_REQUEST", {"reason": "invalid_network_address"}
-    if is_private_host(address):
+    try:
+        parsed_final_url = urlparse(final_url or request.get("url", ""))
+    except Exception:
+        parsed_final_url = None
+    final_hostname = parsed_final_url.hostname if parsed_final_url else ""
+    if is_private_host(address) and not (
+        is_proxy_reserved_host(address) and final_hostname and not is_ip_literal(final_hostname) and not is_private_host(final_hostname)
+    ):
         return "FINAL_URL_BLOCKED", {"reason": "private_network_address"}
     return None, None

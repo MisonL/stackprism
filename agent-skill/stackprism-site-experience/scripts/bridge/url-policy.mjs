@@ -23,34 +23,21 @@ const createBlockList = ({ subnets = [], addresses = [] }) => {
 
 const privateIpBlockList = createBlockList({
   subnets: [
-    ['0.0.0.0', 8, 'ipv4'],
-    ['10.0.0.0', 8, 'ipv4'],
-    ['100.64.0.0', 10, 'ipv4'],
-    ['127.0.0.0', 8, 'ipv4'],
-    ['169.254.0.0', 16, 'ipv4'],
-    ['172.16.0.0', 12, 'ipv4'],
-    ['192.0.0.0', 24, 'ipv4'],
-    ['192.0.2.0', 24, 'ipv4'],
-    ['192.88.99.0', 24, 'ipv4'],
-    ['192.168.0.0', 16, 'ipv4'],
-    ['198.18.0.0', 15, 'ipv4'],
-    ['198.51.100.0', 24, 'ipv4'],
-    ['203.0.113.0', 24, 'ipv4'],
-    ['224.0.0.0', 4, 'ipv4'],
-    ['240.0.0.0', 4, 'ipv4'],
+    ['0.0.0.0', 8, 'ipv4'], ['10.0.0.0', 8, 'ipv4'], ['100.64.0.0', 10, 'ipv4'],
+    ['127.0.0.0', 8, 'ipv4'], ['169.254.0.0', 16, 'ipv4'], ['172.16.0.0', 12, 'ipv4'],
+    ['192.0.0.0', 24, 'ipv4'], ['192.0.2.0', 24, 'ipv4'], ['192.88.99.0', 24, 'ipv4'],
+    ['192.168.0.0', 16, 'ipv4'], ['198.18.0.0', 15, 'ipv4'], ['198.51.100.0', 24, 'ipv4'],
+    ['203.0.113.0', 24, 'ipv4'], ['224.0.0.0', 4, 'ipv4'], ['240.0.0.0', 4, 'ipv4'],
     ['255.255.255.255', 32, 'ipv4'],
-    ['::', 128, 'ipv6'],
-    ['::1', 128, 'ipv6'],
-    ['64:ff9b:1::', 48, 'ipv6'],
-    ['100::', 64, 'ipv6'],
-    ['2001::', 23, 'ipv6'],
-    ['2001:db8::', 32, 'ipv6'],
-    ['2002::', 16, 'ipv6'],
-    ['3fff::', 20, 'ipv6'],
-    ['fc00::', 7, 'ipv6'],
-    ['fe80::', 10, 'ipv6'],
+    ['::', 128, 'ipv6'], ['::1', 128, 'ipv6'], ['64:ff9b:1::', 48, 'ipv6'], ['100::', 64, 'ipv6'],
+    ['2001::', 23, 'ipv6'], ['2001:db8::', 32, 'ipv6'], ['2002::', 16, 'ipv6'],
+    ['3fff::', 20, 'ipv6'], ['fc00::', 7, 'ipv6'], ['fe80::', 10, 'ipv6'],
     ['ff00::', 8, 'ipv6']
   ]
+})
+
+const proxyReservedIpBlockList = createBlockList({
+  subnets: [['198.18.0.0', 15, 'ipv4']]
 })
 
 const publicIpExceptionBlockList = createBlockList({
@@ -83,6 +70,15 @@ export const isPrivateIpLiteral = hostname => {
   return false
 }
 
+export const isProxyReservedIpLiteral = hostname => {
+  const host = hostname.replace(/^\[|\]$/g, '')
+  if (net.isIP(host) === 4) return proxyReservedIpBlockList.check(host, 'ipv4')
+  const lowerHost = host.toLowerCase()
+  if (lowerHost.startsWith('::ffff:')) return isProxyReservedIpLiteral(mappedIpv4Address(lowerHost.slice('::ffff:'.length)))
+  if (lowerHost.startsWith('0:0:0:0:0:ffff:')) return isProxyReservedIpLiteral(mappedIpv4Address(lowerHost.slice('0:0:0:0:0:ffff:'.length)))
+  return false
+}
+
 const isPrivateIpv4Literal = value => {
   return privateIpBlockList.check(value, 'ipv4') && !publicIpExceptionBlockList.check(value, 'ipv4')
 }
@@ -100,7 +96,7 @@ const mappedIpv4Address = value => {
   return [high >> 8, high & 0xff, low >> 8, low & 0xff].join('.')
 }
 
-const isIpLiteral = hostname => net.isIP(hostname.replace(/^\[|\]$/g, '')) !== 0
+export const isIpLiteral = hostname => net.isIP(hostname.replace(/^\[|\]$/g, '')) !== 0
 const effectivePort = parsed => parsed.port || (parsed.protocol === 'http:' ? '80' : parsed.protocol === 'https:' ? '443' : '')
 
 const isBridgeLoopbackAlias = (hostname, bridgeHostname) => {
@@ -126,9 +122,9 @@ const normalizeDnsAddress = item => {
   return ''
 }
 
-const isPrivateResolvedAddress = item => {
+const isBlockedResolvedAddress = item => {
   const address = normalizeDnsAddress(item)
-  return Boolean(address && isPrivateIpLiteral(address))
+  return Boolean(address && isPrivateIpLiteral(address) && !isProxyReservedIpLiteral(address))
 }
 
 const defaultResolveHostname = async hostname => {
@@ -150,22 +146,10 @@ const validateDnsPolicy = async (parsed, allowPrivateNetworkTarget, resolveHostn
   try {
     addresses = await resolveHostname(parsed.hostname)
   } catch {
-    return {
-      ok: false,
-      code: 'TARGET_DNS_LOOKUP_FAILED',
-      message: 'Target hostname could not be resolved.',
-      details: { reason: 'dns_lookup_failed' }
-    }
+    return dnsLookupFailed()
   }
-  if (!Array.isArray(addresses) || !addresses.length) {
-    return {
-      ok: false,
-      code: 'TARGET_DNS_LOOKUP_FAILED',
-      message: 'Target hostname could not be resolved.',
-      details: { reason: 'dns_lookup_failed' }
-    }
-  }
-  if (addresses.some(isPrivateResolvedAddress)) {
+  if (!Array.isArray(addresses) || !addresses.length) return dnsLookupFailed()
+  if (addresses.some(isBlockedResolvedAddress)) {
     return {
       ok: false,
       code: 'PRIVATE_NETWORK_TARGET_BLOCKED',
@@ -175,6 +159,13 @@ const validateDnsPolicy = async (parsed, allowPrivateNetworkTarget, resolveHostn
   }
   return { ok: true }
 }
+
+const dnsLookupFailed = () => ({
+  ok: false,
+  code: 'TARGET_DNS_LOOKUP_FAILED',
+  message: 'Target hostname could not be resolved.',
+  details: { reason: 'dns_lookup_failed' }
+})
 
 const validateViewports = viewports =>
   Array.isArray(viewports) &&

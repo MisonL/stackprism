@@ -225,7 +225,7 @@ class BridgeHandler(BaseBridgeHandler):
         if body.get("finalUrl"):
             final_url_result = validate_final_url(body["finalUrl"], self.server.store.base_url, capture["request"])
             from_cache = body.get("targetNetworkFromCache") is True
-            network_result = validate_target_network_address(body.get("targetNetworkAddress"), capture["request"], from_cache)
+            network_result = validate_target_network_address(body.get("targetNetworkAddress"), capture["request"], from_cache, final_url_result[0] if final_url_result else None)
         with self.server.store._lock:
             valid, code, message = validate_status_update(capture, body)
             if not valid:

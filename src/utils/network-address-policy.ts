@@ -44,6 +44,8 @@ const publicIpv6Exceptions: Array<[string, number]> = [
   ['2001:30::', 28]
 ]
 
+const proxyReservedIpv4Blocks: Array<[string, number]> = [['198.18.0.0', 15]]
+
 const cleanAddress = (value: unknown): string =>
   String(value || '')
     .trim()
@@ -139,4 +141,15 @@ export const isPrivateNetworkAddress = (value: unknown): boolean => {
   if (mapped) return isPrivateNetworkAddress(mapped)
   const ipv6 = parseIpv6(address)
   return ipv6 !== null && isBlockedIpv6(ipv6)
+}
+
+export const isProxyReservedNetworkAddress = (value: unknown): boolean => {
+  const address = cleanAddress(value)
+  if (!address) return false
+  const ipv4 = parseIpv4(address)
+  if (ipv4 !== null) {
+    return proxyReservedIpv4Blocks.some(([base, prefix]) => contains(BigInt(ipv4), BigInt(parseIpv4(base) ?? 0), prefix, IPV4_BITS))
+  }
+  const mapped = mappedIpv4FromIpv6(address)
+  return mapped ? isProxyReservedNetworkAddress(mapped) : false
 }

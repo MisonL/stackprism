@@ -1935,16 +1935,23 @@ test('url policy rejects fixture-resolved private hostnames without real DNS', a
   assert.equal(mixedResult.ok, false)
   assert.equal(mixedResult.code, urlPolicyCases.mixedHostname.errorCode)
 
-  const nonGlobalResult = await normalizeCaptureRequest(
-    { ...baseCaptureRequest, url: urlPolicyCases.nonGlobalHostname.url },
+  const proxyReservedResult = await normalizeCaptureRequest(
+    { ...baseCaptureRequest, url: urlPolicyCases.proxyReservedHostname.url },
     'http://127.0.0.1:17370',
     {
-      resolveHostname: async () => urlPolicyCases.nonGlobalHostname.resolvedAddresses.map(address => ({ address, family: 4 }))
+      resolveHostname: async () => urlPolicyCases.proxyReservedHostname.resolvedAddresses.map(address => ({ address, family: 4 }))
     }
   )
-  assert.equal(nonGlobalResult.ok, false)
-  assert.equal(nonGlobalResult.code, urlPolicyCases.nonGlobalHostname.errorCode)
-  assert.equal(nonGlobalResult.details.reason, 'private_network_address')
+  assert.equal(proxyReservedResult.ok, true)
+  assert.equal(proxyReservedResult.request.url, urlPolicyCases.proxyReservedHostname.normalizedUrl)
+
+  const proxyReservedIpLiteralResult = await normalizeCaptureRequest(
+    { ...baseCaptureRequest, url: urlPolicyCases.proxyReservedIpLiteral.url },
+    'http://127.0.0.1:17370'
+  )
+  assert.equal(proxyReservedIpLiteralResult.ok, false)
+  assert.equal(proxyReservedIpLiteralResult.code, urlPolicyCases.proxyReservedIpLiteral.errorCode)
+  assert.equal(proxyReservedIpLiteralResult.details.reason, 'private_network_address')
 
   for (const policyCase of [urlPolicyCases.specialUseHostname, urlPolicyCases.specialUseIpv6Hostname]) {
     for (const address of policyCase.resolvedAddresses) {
@@ -2091,6 +2098,38 @@ test('js bridge rejects private browser-observed target addresses', async () => 
     },
     {
       resolveHostname: async () => [{ address: '93.184.216.34', family: 4 }]
+    }
+  )
+})
+
+test('js bridge accepts proxy-reserved browser-observed addresses for public hostnames', async () => {
+  await withBridge(
+    async ready => {
+      const created = await createCapture(ready)
+      const config = await loadBridgeConfig(created.body.bridgeUrl)
+      const status = await readJson(
+        await fetch(`${ready.baseUrl}/v1/captures/${created.body.id}/status`, {
+          method: 'POST',
+          headers: { ...auth(config.bridgeToken), 'Content-Type': 'application/json' },
+          body: JSON.stringify(
+            statusBody(created.body.id, config, {
+              status: 'running',
+              phase: 'target_loaded',
+              sequence: 1,
+              finalUrl: 'https://proxy-reserved.example/dashboard',
+              targetNetworkAddress: '198.18.0.12'
+            })
+          )
+        })
+      )
+      assert.equal(status.status, 200)
+      assert.equal(status.body.phase, 'target_loaded')
+    },
+    {
+      resolveHostname: async hostname => {
+        assert.equal(hostname, 'proxy-reserved.example')
+        return [{ address: '198.18.0.12', family: 4 }]
+      }
     }
   )
 })

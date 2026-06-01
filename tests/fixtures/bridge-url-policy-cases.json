@@ -14,9 +14,13 @@
     "resolvedAddresses": ["93.184.216.34", "10.1.2.3"],
     "errorCode": "PRIVATE_NETWORK_TARGET_BLOCKED"
   },
-  "nonGlobalHostname": {
-    "url": "https://rewritten.invalid/dashboard",
+  "proxyReservedHostname": {
+    "url": "https://proxy-reserved.example/dashboard",
     "resolvedAddresses": ["198.18.0.12"],
+    "normalizedUrl": "https://proxy-reserved.example/dashboard"
+  },
+  "proxyReservedIpLiteral": {
+    "url": "https://198.18.0.12/dashboard",
     "errorCode": "PRIVATE_NETWORK_TARGET_BLOCKED"
   },
   "specialUseHostname": {

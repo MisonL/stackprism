@@ -2476,6 +2476,34 @@ test('python fallback rejects private browser-observed target addresses', async 
   }
 })
 
+test('python fallback accepts proxy-reserved browser-observed addresses for public hostnames', async () => {
+  const { child, ready } = await startPythonBridge()
+  try {
+    const created = await createCapture(ready)
+    const config = await loadBridgeConfig(created.body.bridgeUrl)
+    const status = await readJson(
+      await fetch(`${ready.baseUrl}/v1/captures/${created.body.id}/status`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${config.bridgeToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(
+          statusBody(created.body.id, config, {
+            status: 'running',
+            phase: 'target_loaded',
+            sequence: 1,
+            finalUrl: 'https://proxy-reserved.example/dashboard',
+            targetNetworkAddress: '198.18.0.12'
+          })
+        )
+      })
+    )
+    assert.equal(status.status, 200)
+    assert.equal(status.body.phase, 'target_loaded')
+  } finally {
+    child.kill('SIGTERM')
+    await once(child, 'exit')
+  }
+})
+
 test('python fallback rejects non-ip browser-observed target addresses', async () => {
   const { child, ready } = await startPythonBridge()
   try {
@@ -2822,8 +2850,16 @@ mixed_request = {
     "viewports": [],
     "options": {"targetMode": "reuse_or_new_tab"},
 }
-non_global_request = {
-    "url": ${JSON.stringify(urlPolicyCases.nonGlobalHostname.url)},
+proxy_reserved_request = {
+    "url": ${JSON.stringify(urlPolicyCases.proxyReservedHostname.url)},
+    "mode": "experience",
+    "waitMs": 0,
+    "include": ["tech"],
+    "viewports": [],
+    "options": {"targetMode": "reuse_or_new_tab"},
+}
+proxy_reserved_ip_literal_request = {
+    "url": ${JSON.stringify(urlPolicyCases.proxyReservedIpLiteral.url)},
     "mode": "experience",
     "waitMs": 0,
     "include": ["tech"],
@@ -2876,8 +2912,8 @@ def resolver(hostname):
         return ${JSON.stringify(urlPolicyCases.publicHostname.resolvedAddresses)}
     if hostname == "mixed.internal.example":
         return ${JSON.stringify(urlPolicyCases.mixedHostname.resolvedAddresses)}
-    if hostname == "rewritten.invalid":
-        return ${JSON.stringify(urlPolicyCases.nonGlobalHostname.resolvedAddresses)}
+    if hostname == "proxy-reserved.example":
+        return ${JSON.stringify(urlPolicyCases.proxyReservedHostname.resolvedAddresses)}
     if hostname == "special-use.internal.example":
         return ${JSON.stringify(urlPolicyCases.specialUseHostname.resolvedAddresses)}
     if hostname == "special-use-v6.internal.example":
@@ -2907,7 +2943,8 @@ def normalize_with_single_address(request, address):
 public_normalized, public_code, _public_details, _public_message = normalize_capture_request(public_request, "http://127.0.0.1:17370", resolver)
 private_normalized, private_code, private_details, private_message = normalize_capture_request(private_request, "http://127.0.0.1:17370", resolver)
 mixed_normalized, mixed_code, mixed_details, mixed_message = normalize_capture_request(mixed_request, "http://127.0.0.1:17370", resolver)
-non_global_normalized, non_global_code, non_global_details, non_global_message = normalize_capture_request(non_global_request, "http://127.0.0.1:17370", resolver)
+proxy_reserved_normalized, proxy_reserved_code, proxy_reserved_details, proxy_reserved_message = normalize_capture_request(proxy_reserved_request, "http://127.0.0.1:17370", resolver)
+proxy_reserved_ip_literal_normalized, proxy_reserved_ip_literal_code, proxy_reserved_ip_literal_details, proxy_reserved_ip_literal_message = normalize_capture_request(proxy_reserved_ip_literal_request, "http://127.0.0.1:17370", resolver)
 special_use_normalized, special_use_code, special_use_details, special_use_message = normalize_capture_request(special_use_request, "http://127.0.0.1:17370", resolver)
 failed_lookup_normalized, failed_lookup_code, failed_lookup_details, failed_lookup_message = normalize_capture_request(failed_lookup_request, "http://127.0.0.1:17370", failed_resolver)
 empty_lookup_normalized, empty_lookup_code, empty_lookup_details, empty_lookup_message = normalize_capture_request(empty_lookup_request, "http://127.0.0.1:17370", empty_resolver)
@@ -2933,10 +2970,14 @@ print(json.dumps({
     "mixedCode": mixed_code,
     "mixedDetails": mixed_details,
     "mixedMessage": mixed_message,
-    "nonGlobalNormalized": non_global_normalized,
-    "nonGlobalCode": non_global_code,
-    "nonGlobalDetails": non_global_details,
-    "nonGlobalMessage": non_global_message,
+    "proxyReservedUrl": proxy_reserved_normalized["url"] if proxy_reserved_normalized else None,
+    "proxyReservedCode": proxy_reserved_code,
+    "proxyReservedDetails": proxy_reserved_details,
+    "proxyReservedMessage": proxy_reserved_message,
+    "proxyReservedIpLiteralNormalized": proxy_reserved_ip_literal_normalized,
+    "proxyReservedIpLiteralCode": proxy_reserved_ip_literal_code,
+    "proxyReservedIpLiteralDetails": proxy_reserved_ip_literal_details,
+    "proxyReservedIpLiteralMessage": proxy_reserved_ip_literal_message,
     "specialUseNormalized": special_use_normalized,
     "specialUseCode": special_use_code,
     "specialUseDetails": special_use_details,
@@ -2972,9 +3013,11 @@ print(json.dumps({
   assert.equal(parsed.mixedNormalized, null)
   assert.equal(parsed.mixedCode, urlPolicyCases.mixedHostname.errorCode)
   assert.equal(parsed.mixedDetails.reason, 'private_network_address')
-  assert.equal(parsed.nonGlobalNormalized, null)
-  assert.equal(parsed.nonGlobalCode, urlPolicyCases.nonGlobalHostname.errorCode)
-  assert.equal(parsed.nonGlobalDetails.reason, 'private_network_address')
+  assert.equal(parsed.proxyReservedUrl, urlPolicyCases.proxyReservedHostname.normalizedUrl)
+  assert.equal(parsed.proxyReservedCode, null)
+  assert.equal(parsed.proxyReservedIpLiteralNormalized, null)
+  assert.equal(parsed.proxyReservedIpLiteralCode, urlPolicyCases.proxyReservedIpLiteral.errorCode)
+  assert.equal(parsed.proxyReservedIpLiteralDetails.reason, 'private_network_address')
   assert.equal(parsed.specialUseNormalized, null)
   assert.equal(parsed.specialUseCode, urlPolicyCases.specialUseHostname.errorCode)
   assert.equal(parsed.specialUseDetails.reason, 'private_network_address')

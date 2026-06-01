@@ -195,6 +195,7 @@ export const createBridgeServer = ({ port = 0, env = process.env, resolveHostnam
             return fail(res, 409, finalUrl.code, finalUrl.message, finalUrl.details)
           }
           const network = validateTargetNetworkAddress(parsed.body.targetNetworkAddress, lockedCapture.request, {
+            finalUrl: finalUrl.finalUrl,
             fromCache: parsed.body.targetNetworkFromCache === true
           })
           if (!network.ok) {
