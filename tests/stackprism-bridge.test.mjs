@@ -304,9 +304,15 @@ const loadBridgeConfig = async bridgeUrl => {
 }
 
 test('settings and help pages document mobile and agent bridge UI boundaries', () => {
+  const popup = readFileSync('src/ui/popup/Popup.vue', 'utf8')
   const settings = readFileSync('src/ui/settings/Settings.vue', 'utf8')
   const help = readFileSync('src/ui/help/Help.vue', 'utf8')
 
+  assert.match(popup, /class="agent-bridge-badge"/)
+  assert.match(popup, /normalizeSettingsWithLocalOptIn/)
+  assert.match(popup, /chrome\.storage\.local\.get\(SETTINGS_STORAGE_KEY\)/)
+  assert.match(popup, /Agent Bridge 已开启，所有网络目标已放开/)
+  assert.match(popup, /\.agent-bridge-badge \{[\s\S]*border-radius: 999px/)
   assert.match(settings, /@media \(max-width: 760px\)[\s\S]*padding-top: 0/)
   assert.match(settings, /@media \(max-width: 760px\)[\s\S]*\.settings-header[\s\S]*position: static/)
   assert.match(settings, /<main ref="settingsShell" class="settings-shell" tabindex="-1">/)
