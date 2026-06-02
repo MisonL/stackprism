@@ -10,6 +10,7 @@ import { logBackgroundError } from './logging'
 
 const TARGET_LOAD_TIMEOUT_REPORTING_GRACE_MS = 5000
 const MAX_TARGET_LOAD_WAIT_MS = 60000
+const RELOAD_COMPLETE_WITHOUT_LOADING_GRACE_MS = 500
 const SCREENSHOT_QUALITY = 72
 const MAX_SCREENSHOT_BYTES = 2 * 1024 * 1024
 const SCREENSHOT_CAPTURE_RETRY_DELAYS_MS = [250, 750, 1500, 2500]
@@ -104,6 +105,68 @@ export const waitForTargetTabLoaded = async (tabId: number, deadlineAt: number):
     chrome.tabs.onUpdated?.addListener?.(listener)
     chrome.tabs.onRemoved?.addListener?.(removedListener)
     timeout = setTimeout(() => finish(() => reject(new Error('TARGET_LOAD_TIMEOUT'))), timeoutMs)
+  })
+}
+
+export const reloadTargetTabBypassingCache = async (tabId: number, deadlineAt: number): Promise<chrome.tabs.Tab> => {
+  if (!chrome.tabs.reload) return waitForTargetTabLoaded(tabId, deadlineAt)
+  const initialTab = await chrome.tabs.get(tabId)
+  const initialUrl = normalizeComparableUrl(initialTab.url)
+  const timeoutMs = Math.max(0, Math.min(deadlineAt - Date.now() - TARGET_LOAD_TIMEOUT_REPORTING_GRACE_MS, MAX_TARGET_LOAD_WAIT_MS))
+  return new Promise((resolve, reject) => {
+    let settled = false
+    let reloadStarted = false
+    let timeout: ReturnType<typeof setTimeout> | null = null
+    let completeWithoutLoadingTimer: ReturnType<typeof setTimeout> | null = null
+    const clearCompleteWithoutLoadingTimer = () => {
+      if (!completeWithoutLoadingTimer) return
+      clearTimeout(completeWithoutLoadingTimer)
+      completeWithoutLoadingTimer = null
+    }
+    const cleanup = () => {
+      if (timeout) clearTimeout(timeout)
+      clearCompleteWithoutLoadingTimer()
+      chrome.tabs.onUpdated?.removeListener?.(listener)
+      chrome.tabs.onRemoved?.removeListener?.(removedListener)
+    }
+    const finish = (callback: () => void) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      callback()
+    }
+    const listener = (updatedTabId: number, changeInfo: chrome.tabs.TabChangeInfo, tab: chrome.tabs.Tab) => {
+      if (updatedTabId !== tabId) return
+      if (changeInfo.status === 'loading') {
+        clearCompleteWithoutLoadingTimer()
+        reloadStarted = true
+        return
+      }
+      if (changeInfo.status !== 'complete') return
+      if (reloadStarted) {
+        finish(() => resolve(tab))
+        return
+      }
+      const completedUrl = normalizeComparableUrl(tab.url)
+      if (completedUrl && initialUrl && completedUrl !== initialUrl) {
+        finish(() => resolve(tab))
+        return
+      }
+      if (completeWithoutLoadingTimer) return
+      completeWithoutLoadingTimer = setTimeout(
+        () => finish(() => resolve(tab)),
+        RELOAD_COMPLETE_WITHOUT_LOADING_GRACE_MS
+      )
+    }
+    const removedListener = (removedTabId: number) => {
+      if (removedTabId === tabId) finish(() => reject(new Error('TARGET_TAB_CLOSED')))
+    }
+    chrome.tabs.onUpdated?.addListener?.(listener)
+    chrome.tabs.onRemoved?.addListener?.(removedListener)
+    timeout = setTimeout(() => finish(() => reject(new Error('TARGET_LOAD_TIMEOUT'))), timeoutMs)
+    chrome.tabs
+      .reload(tabId, { bypassCache: true })
+      .catch(error => finish(() => reject(error)))
   })
 }
 

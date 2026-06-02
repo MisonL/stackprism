@@ -31,6 +31,7 @@ import {
   executeExperienceProfiler,
   getAgentCaptureUserAgent,
   getExtensionVersion,
+  reloadTargetTabBypassingCache,
   resolveTargetTab,
   waitForTargetTabLoaded
 } from './agent-capture-target'
@@ -132,7 +133,15 @@ const runCapture = async (state: AgentCaptureState, request: AgentCaptureRequest
   try {
     if (!state.targetTabId) throw new Error('TARGET_TAB_CLOSED')
     const targetTabId = state.targetTabId
-    const loadedTab = await waitForTargetTabLoaded(targetTabId, state.deadlineAt)
+    if (request.options.forceRefresh) {
+      state.targetNetwork = undefined
+      state.targetNetworkObservedAfter = Date.now()
+      state.updatedAt = state.targetNetworkObservedAfter
+      await saveAgentCaptureState(state)
+    }
+    const loadedTab = request.options.forceRefresh
+      ? await reloadTargetTabBypassingCache(targetTabId, state.deadlineAt)
+      : await waitForTargetTabLoaded(targetTabId, state.deadlineAt)
     if (!(await shouldContinueCapture(state))) return
     const targetTab = {
       id: loadedTab.id ?? state.targetTabId,
@@ -324,11 +333,11 @@ export const startAgentCapture = async (
     const bridgeTab = sender.tab
     if (bridgeTab?.incognito)
       return { ok: false, error: makeAgentCaptureError('INCOGNITO_NOT_SUPPORTED', 'Incognito bridge tabs are not supported.') }
+    const now = Date.now()
     const target = await resolveTargetTab(requestResult.request, session.session.windowId)
     if (!target.ok) return { ok: false, error: target.error }
     if (target.tab.incognito)
       return { ok: false, error: makeAgentCaptureError('INCOGNITO_NOT_SUPPORTED', 'Incognito target tabs are not supported.') }
-    const now = Date.now()
     const state: AgentCaptureState = {
       captureId: session.session.captureId,
       sessionId: session.session.sessionId,

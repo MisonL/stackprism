@@ -33,8 +33,8 @@ export const failAgentCaptureWithPoster = async (
 ): Promise<void> => {
   if (!nonTerminalStatuses.has(state.status)) return
   const failure = makeAgentCaptureError(code, message, details)
+  const failurePhase = state.phase
   state.status = 'failed'
-  state.phase = 'cleanup'
   state.error = failure
   state.updatedAt = Date.now()
   await saveAgentCaptureState(state)
@@ -45,7 +45,7 @@ export const failAgentCaptureWithPoster = async (
       reportCleanupFailure('clearProfileTransferPort', caught)
     }
     if (notifyBridge) {
-      await postCaptureStatusToBridge(state, 'failed', 'cleanup', { error: failure }).catch(caught =>
+      await postCaptureStatusToBridge(state, 'failed', failurePhase, { error: failure }).catch(caught =>
         reportCleanupFailure('postCaptureStatusToBridge', caught)
       )
     }

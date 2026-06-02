@@ -44,6 +44,7 @@ export interface AgentCaptureState {
   phase: string
   status: AgentCaptureStatus
   startedAt: number
+  targetNetworkObservedAfter?: number
   updatedAt: number
   deadlineAt: number
   cancelDeadlineAt?: number
@@ -99,6 +100,7 @@ const isStoredAgentCaptureState = (value: unknown, captureId: string): value is 
     typeof value.status === 'string' &&
     captureStatuses.has(value.status as AgentCaptureStatus) &&
     isFiniteNumber(value.startedAt) &&
+    isOptionalFiniteNumber(value.targetNetworkObservedAfter) &&
     isFiniteNumber(value.updatedAt) &&
     isFiniteNumber(value.deadlineAt) &&
     isOptionalFiniteNumber(value.cancelDeadlineAt) &&

@@ -27,6 +27,7 @@ const STATUS_PHASES = new Set([
 const CONTROL_POLL_MS = 1000
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled', 'expired'])
 const KNOWN_ERROR_CODES = new Set<string>(AGENT_BRIDGE_ERROR_CODES)
+const PHASE_ORDER = new Map([...STATUS_PHASES].map((phase, index) => [phase, index]))
 
 const makeError = (code: AgentBridgeError['code'], message: string, details: Record<string, unknown> = {}): AgentBridgeError => ({
   code,
@@ -114,7 +115,13 @@ const missingRequiredCapability = (capabilities: AgentBridgeCapabilities): strin
   REQUIRED_AGENT_BRIDGE_CAPABILITIES.find(capability => capabilities?.[capability] !== true)
 
 export const normalizeWritableStatusPhase = (status: AgentCaptureStatus, phase?: string): string | undefined =>
-  status === 'failed' || status === 'cancelled' ? 'cleanup' : phase
+  status === 'cancelled' ? 'cleanup' : status === 'failed' ? phase || 'cleanup' : phase
+
+const laterPhase = (left: string, right: string): string => {
+  const leftOrder = PHASE_ORDER.get(left) ?? -1
+  const rightOrder = PHASE_ORDER.get(right) ?? -1
+  return rightOrder > leftOrder ? right : left
+}
 
 const sendRuntimeMessage = (message: AgentBridgeRuntimeMessage): Promise<any> =>
   new Promise(resolve => {
@@ -178,6 +185,7 @@ const runAgentBridgeClient = async () => {
   const postStatus = createStatusPoster(context)
   let terminalStatusPosted = false
   let stopControlPolling = () => {}
+  let currentPhase = 'bridge_connected'
   const postTrackedStatus = async (
     status: AgentCaptureStatus,
     phase?: string,
@@ -185,11 +193,13 @@ const runAgentBridgeClient = async () => {
     extra: Record<string, unknown> = {},
     requestInit: RequestInit = {}
   ) => {
+    if (phase && STATUS_PHASES.has(phase)) currentPhase = laterPhase(currentPhase, phase)
+    const writablePhase = status === 'failed' ? currentPhase : phase
     if (TERMINAL_STATUSES.has(status)) {
       terminalStatusPosted = true
       stopControlPolling()
     }
-    await postStatus(status, phase, error, extra, requestInit)
+    await postStatus(status, writablePhase, error, extra, requestInit)
   }
   const postBridgeClosed = () => {
     if (terminalStatusPosted) return
@@ -234,14 +244,14 @@ const runAgentBridgeClient = async () => {
       protocolVersion: bridgeProtocolVersion
     })
     if (!hello?.ok) {
-      await postTrackedStatus('failed', 'bridge_connected', hello?.error || makeError('INVALID_REQUEST', 'Agent bridge hello failed.'))
+      await postTrackedStatus('failed', 'request_loaded', hello?.error || makeError('INVALID_REQUEST', 'Agent bridge hello failed.'))
       return
     }
     if (!hasRequiredCapabilities(hello.data.capabilities)) {
       const missingCapability = missingRequiredCapability(hello.data.capabilities)
       await postTrackedStatus(
         'failed',
-        'bridge_connected',
+        'request_loaded',
         makeError('NOT_SUPPORTED', 'Required extension capabilities are missing.', { missingCapability })
       )
       return
@@ -267,7 +277,7 @@ const runAgentBridgeClient = async () => {
     }
     stopControlPolling = startControlPolling(context)
   } catch (error) {
-    await postTrackedStatus('failed', 'bridge_connected', errorFromUnknown(error, 'PROFILE_TRANSPORT_FAILED')).catch(() => {})
+    await postTrackedStatus('failed', currentPhase, errorFromUnknown(error, 'PROFILE_TRANSPORT_FAILED')).catch(() => {})
   }
 }
 

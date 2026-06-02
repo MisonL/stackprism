@@ -25,7 +25,7 @@ import {
   handleAgentCaptureTabRemoved,
   recoverInterruptedAgentCaptures
 } from './agent-capture'
-import { clearAgentCaptureNetworkEvidence, registerAgentCaptureNetworkObserver } from './agent-capture-network'
+import { clearAgentCaptureNetworkEvidence, clearStaleAgentCaptureNetworkEvidence, registerAgentCaptureNetworkObserver } from './agent-capture-network'
 import { isDetectablePageUrl, isObservableRequestUrl } from '@/utils/page-support'
 import { clearLegacySessionKeys } from '@/utils/browser-compat'
 
@@ -107,7 +107,9 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     clearActiveDetectionTimer(tabId)
     clearDynamicSnapshotTimer(tabId)
     clearPendingDynamicSnapshot(tabId)
-    clearAgentCaptureNetworkEvidence(tabId)
+    clearStaleAgentCaptureNetworkEvidence(tabId).catch(error =>
+      logBackgroundError('clearStaleAgentCaptureNetworkEvidence failed', { tabId, error })
+    )
     clearBadge(tabId)
     return
   }
