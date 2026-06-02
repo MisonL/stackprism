@@ -79,8 +79,8 @@ def validate_status_update(capture, body):
         return False, "INVALID_REQUEST", "Failed status requires a structured error."
     if body["status"] == "failed" and not is_known_bridge_error_code(body["error"]["code"]):
         return False, "INVALID_REQUEST", "Failed status error code is invalid."
-    if body["status"] in {"cancelled", "failed"} and body["phase"] != "cleanup":
-        return False, "INVALID_REQUEST", "Terminal status must use cleanup phase."
+    if body["status"] == "cancelled" and body["phase"] != "cleanup":
+        return False, "INVALID_REQUEST", "Cancelled status must use cleanup phase."
     if not isinstance(body.get("sequence"), int) or body["sequence"] <= capture["sequence"]:
         return False, "STALE_STATUS_UPDATE", "Capture status sequence is stale."
     if PHASE_ORDER[body["phase"]] < PHASE_ORDER.get(capture.get("phase"), -1):

@@ -17,7 +17,7 @@ from .url_policy import normalize_capture_request, validate_final_url, validate_
 
 
 PROFILE_BODY_LIMIT = 8 * 1024 * 1024
-DEFAULT_REQUEST_TIMEOUT_SECONDS = 10
+DEFAULT_REQUEST_TIMEOUT_SECONDS = 35
 
 
 class BridgeHandler(BaseBridgeHandler):
@@ -237,7 +237,7 @@ class BridgeHandler(BaseBridgeHandler):
                 network_code, network_details = network_result
                 if code:
                     capture["status"] = "failed"
-                    capture["phase"] = "cleanup"
+                    capture["phase"] = body["phase"]
                     capture["error"] = error_body(code, "Final URL is blocked by target policy.", details)["error"]
                     response = ("fail", 409, code, "Final URL is blocked by target policy.", details)
                 elif network_code == "INVALID_REQUEST":
@@ -245,7 +245,7 @@ class BridgeHandler(BaseBridgeHandler):
                 elif network_code:
                     message = "Final URL is blocked by target policy."
                     capture["status"] = "failed"
-                    capture["phase"] = "cleanup"
+                    capture["phase"] = body["phase"]
                     capture["error"] = error_body(network_code, message, network_details)["error"]
                     response = ("fail", 409, network_code, message, network_details)
                 else:

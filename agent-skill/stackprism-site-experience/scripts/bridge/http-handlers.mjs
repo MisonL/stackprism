@@ -132,8 +132,8 @@ export const validateStatusUpdate = (capture, body) => {
   if (body.status === 'failed' && !isKnownBridgeErrorCode(body.error.code)) {
     return { ok: false, code: 'INVALID_REQUEST', message: 'Failed status error code is invalid.' }
   }
-  if ((body.status === 'cancelled' || body.status === 'failed') && body.phase !== 'cleanup') {
-    return { ok: false, code: 'INVALID_REQUEST', message: 'Terminal status must use cleanup phase.' }
+  if (body.status === 'cancelled' && body.phase !== 'cleanup') {
+    return { ok: false, code: 'INVALID_REQUEST', message: 'Cancelled status must use cleanup phase.' }
   }
   if (!Number.isInteger(body.sequence) || body.sequence <= capture.sequence) {
     return { ok: false, code: 'STALE_STATUS_UPDATE', message: 'Capture status sequence is stale.' }

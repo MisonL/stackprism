@@ -4,8 +4,24 @@ import platform
 import subprocess
 
 
+DEFAULT_OPEN_TIMEOUT_SECONDS = 5
+MAX_OPEN_TIMEOUT_SECONDS = 30
+
+
 def contains_nul(value):
     return isinstance(value, str) and "\0" in value or isinstance(value, list) and any(contains_nul(item) for item in value)
+
+
+def parse_open_timeout_seconds(env):
+    value = env.get("STACKPRISM_BROWSER_OPEN_TIMEOUT_MS")
+    if value is None or value == "":
+        return True, DEFAULT_OPEN_TIMEOUT_SECONDS, None
+    if not str(value).isdecimal():
+        return False, None, {"reason": "invalid_open_timeout"}
+    timeout_ms = int(value)
+    if timeout_ms < 100 or timeout_ms > MAX_OPEN_TIMEOUT_SECONDS * 1000:
+        return False, None, {"reason": "invalid_open_timeout"}
+    return True, timeout_ms / 1000, None
 
 
 def parse_open_config(env=os.environ):
@@ -53,11 +69,14 @@ def open_browser(url, env=os.environ):
     resolved_ok, resolved = resolve_browser_open_command(env)
     if not resolved_ok:
         return False, resolved
+    timeout_ok, timeout_seconds, timeout_details = parse_open_timeout_seconds(env)
+    if not timeout_ok:
+        return False, timeout_details
     command = resolved["command"]
     args = resolved["args"]
 
     try:
-        completed = subprocess.run([command, *args, url], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
+        completed = subprocess.run([command, *args, url], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout_seconds)
     except FileNotFoundError:
         return False, {"reason": "command_not_found"}
     except PermissionError:

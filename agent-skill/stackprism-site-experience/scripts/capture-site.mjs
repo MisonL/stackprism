@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { parseTerminalSettleMs, sleep, stopChild } from './capture-runtime.mjs'
 
 const DEFAULT_INCLUDE = ['tech', 'visual', 'layout', 'components', 'interaction', 'ux', 'assets']
 const DEFAULT_VIEWPORT = { name: 'desktop', width: 1440, height: 900, deviceScaleFactor: 1 }
@@ -136,37 +137,7 @@ const requestJson = async (url, token, init = {}) => {
   }
 }
 
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
-
-const timeoutSignal = ms => {
-  let timer
-  const promise = new Promise(resolve => {
-    timer = setTimeout(resolve, ms)
-  })
-  return {
-    promise,
-    clear: () => clearTimeout(timer)
-  }
-}
-
-const stopChild = async child => {
-  if (child.exitCode !== null || child.killed) return
-  child.stdin.end()
-  const firstTimeout = timeoutSignal(2500)
-  const exited = await Promise.race([
-    new Promise(resolve => child.once('exit', resolve)),
-    firstTimeout.promise.then(() => {
-      child.kill('SIGTERM')
-      return 'killed'
-    })
-  ])
-  firstTimeout.clear()
-  if (exited === 'killed') {
-    const secondTimeout = timeoutSignal(2500)
-    await Promise.race([new Promise(resolve => child.once('exit', resolve)), secondTimeout.promise]).catch(() => {})
-    secondTimeout.clear()
-  }
-}
+const terminalSettleMs = parseTerminalSettleMs(process.env.STACKPRISM_CAPTURE_TERMINAL_SETTLE_MS)
 
 const captureRequest = args => ({
   url: args.url,
@@ -211,6 +182,9 @@ const runCapture = async args => {
       })
       if (['completed', 'failed', 'cancelled', 'expired'].includes(status.status)) break
       await sleep(POLL_INTERVAL_MS)
+    }
+    if (['completed', 'failed', 'cancelled', 'expired'].includes(status.status) && terminalSettleMs > 0) {
+      await sleep(terminalSettleMs)
     }
     if (status.status !== 'completed') {
       const error = new Error(status.error?.code || status.status || 'CAPTURE_TIMEOUT')

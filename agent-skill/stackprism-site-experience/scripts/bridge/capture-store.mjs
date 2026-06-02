@@ -1,6 +1,6 @@
 import { newBridgeToken, newCaptureId, newNonce, newSessionId } from './protocol.mjs'
 
-const CAPTURE_TIMEOUT_MS = 60000
+const CAPTURE_TIMEOUT_MS = 95000
 const EXTENSION_CONNECT_TIMEOUT_MS = 30000
 const CANCEL_TIMEOUT_MS = 10000
 const RESULT_TTL_MS = 10 * 60 * 1000

@@ -1,6 +1,16 @@
 import { spawnSync } from 'node:child_process'
 
+const DEFAULT_OPEN_TIMEOUT_MS = 5000
+const MAX_OPEN_TIMEOUT_MS = 30000
 const containsNul = value => (typeof value === 'string' ? value.includes('\0') : Array.isArray(value) && value.some(containsNul))
+
+export const parseOpenTimeoutMs = env => {
+  const value = env.STACKPRISM_BROWSER_OPEN_TIMEOUT_MS
+  if (value == null || value === '') return { ok: true, timeoutMs: DEFAULT_OPEN_TIMEOUT_MS }
+  const parsed = Number(value)
+  if (Number.isInteger(parsed) && parsed >= 100 && parsed <= MAX_OPEN_TIMEOUT_MS) return { ok: true, timeoutMs: parsed }
+  return { ok: false, details: { reason: 'invalid_open_timeout' } }
+}
 
 export const parseOpenConfig = env => {
   for (const key of ['STACKPRISM_BROWSER_OPEN_COMMAND', 'STACKPRISM_BROWSER_OPEN_ARGS_JSON']) {
@@ -54,10 +64,12 @@ export const openBrowser = (url, env = process.env, platform = process.platform)
 
   const resolved = resolveBrowserOpenCommand(env, platform)
   if (!resolved.ok) return resolved
+  const timeout = parseOpenTimeoutMs(env)
+  if (!timeout.ok) return { ok: false, details: timeout.details }
   const { command, args } = resolved
 
   try {
-    const child = spawnSync(command, [...args, url], { stdio: 'ignore', shell: false, timeout: 2000 })
+    const child = spawnSync(command, [...args, url], { stdio: 'ignore', shell: false, timeout: timeout.timeoutMs })
     if (child.error) return { ok: false, details: { reason: child.error.code === 'ETIMEDOUT' ? 'open_timeout' : 'spawn_failed' } }
     if (child.status !== 0) return { ok: false, details: { reason: 'open_failed' } }
     return { ok: true }

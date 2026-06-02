@@ -35,7 +35,7 @@ const DEFAULT_QUERY_LIMIT_PER_MINUTE = 120
 const DEFAULT_RESOURCE_POLICY = {
   maxOpenConnections: 20,
   headersTimeoutMs: 5000,
-  requestTimeoutMs: 10000,
+  requestTimeoutMs: 35000,
   keepAliveTimeoutMs: 2000
 }
 
@@ -190,7 +190,7 @@ export const createBridgeServer = ({ port = 0, env = process.env, resolveHostnam
           const finalUrl = await validateFinalUrl(parsed.body.finalUrl, baseUrl, lockedCapture.request, { resolveHostname })
           if (!finalUrl.ok) {
             lockedCapture.status = 'failed'
-            lockedCapture.phase = 'cleanup'
+            lockedCapture.phase = parsed.body.phase
             lockedCapture.error = { code: finalUrl.code, message: finalUrl.message, details: finalUrl.details || {} }
             return fail(res, 409, finalUrl.code, finalUrl.message, finalUrl.details)
           }
@@ -201,7 +201,7 @@ export const createBridgeServer = ({ port = 0, env = process.env, resolveHostnam
           if (!network.ok) {
             if (network.code === 'INVALID_REQUEST') return fail(res, 400, network.code, network.message, network.details)
             lockedCapture.status = 'failed'
-            lockedCapture.phase = 'cleanup'
+            lockedCapture.phase = parsed.body.phase
             lockedCapture.error = { code: network.code, message: network.message, details: network.details || {} }
             return fail(res, 409, network.code, network.message, network.details)
           }
