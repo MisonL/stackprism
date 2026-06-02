@@ -13,7 +13,6 @@ import { isPrivateNetworkAddress, isProxyReservedNetworkAddress } from '@/utils/
 const TARGET_NETWORK_WAIT_MS = 1000
 const TARGET_NETWORK_POLL_MS = 25
 const NETWORK_EVIDENCE_CAPTURE_RACE_GRACE_MS = 5000
-let networkObserverRegistered = false
 let networkObserverTarget: unknown = null
 const tabNetworkEvidence = new Map<number, AgentCaptureNetworkEvidence>()
 
@@ -49,9 +48,12 @@ const saveFreshNetworkEvidence = async (state: AgentCaptureState, evidence: Agen
   const latest = await getAgentCaptureState(state.captureId)
   if (!latest || latest.targetTabId !== state.targetTabId || !nonTerminalStatuses.has(latest.status)) return
   if (!isFreshNetworkEvidence(latest, evidence)) return
-  latest.targetNetwork = evidence
-  latest.updatedAt = Date.now()
-  await saveAgentCaptureState(latest)
+  const current = (await getAgentCaptureState(state.captureId)) || latest
+  if (current.targetTabId !== state.targetTabId || !nonTerminalStatuses.has(current.status)) return
+  if (!isFreshNetworkEvidence(current, evidence)) return
+  current.targetNetwork = evidence
+  current.updatedAt = Date.now()
+  await saveAgentCaptureState(current)
 }
 
 export const recordAgentCaptureNetworkResponse = async (details: chrome.webRequest.WebResponseCacheDetails): Promise<void> => {
@@ -77,13 +79,12 @@ export const clearStaleAgentCaptureNetworkEvidence = async (tabId: number): Prom
 }
 
 export const registerAgentCaptureNetworkObserver = (onError: (tabId: number, error: unknown) => void): void => {
-  if (networkObserverRegistered) return
   const responseStarted = chrome.webRequest?.onResponseStarted
+  if (networkObserverTarget === responseStarted) return
   if (!responseStarted?.addListener) {
     networkObserverTarget = null
     return
   }
-  networkObserverRegistered = true
   networkObserverTarget = responseStarted
   responseStarted.addListener(
     details => {
@@ -167,11 +168,20 @@ const canUseProxyReservedAddress = (state: AgentCaptureState, ip: string): boole
 
 const wait = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
 
+const mergeWaitContext = (latest: AgentCaptureState, base: AgentCaptureState): AgentCaptureState => {
+  if (!latest.finalUrl && base.finalUrl) latest.finalUrl = base.finalUrl
+  if (typeof latest.targetNetworkObservedAfter !== 'number' && typeof base.targetNetworkObservedAfter === 'number') {
+    latest.targetNetworkObservedAfter = base.targetNetworkObservedAfter
+  }
+  return latest
+}
+
 export const waitForAgentCaptureNetworkEvidence = async (state: AgentCaptureState): Promise<AgentCaptureState> => {
   if (!isNetworkObserverActive()) return state
   const deadline = Date.now() + TARGET_NETWORK_WAIT_MS
   while (Date.now() < deadline) {
-    const latest = await getAgentCaptureState(state.captureId)
+    const stored = await getAgentCaptureState(state.captureId)
+    const latest = stored ? mergeWaitContext(stored, state) : null
     if (!latest) return state
     if (isCurrentNetworkEvidence(latest)) return latest
     const observed = typeof latest.targetTabId === 'number' ? tabNetworkEvidence.get(latest.targetTabId) : undefined
@@ -182,7 +192,8 @@ export const waitForAgentCaptureNetworkEvidence = async (state: AgentCaptureStat
     }
     await wait(TARGET_NETWORK_POLL_MS)
   }
-  return (await getAgentCaptureState(state.captureId)) || state
+  const latest = await getAgentCaptureState(state.captureId)
+  return latest ? mergeWaitContext(latest, state) : state
 }
 
 export const validateAgentCaptureNetwork = (
@@ -206,4 +217,4 @@ export const validateAgentCaptureNetwork = (
 }
 
 const isNetworkObserverActive = (): boolean =>
-  networkObserverRegistered && Boolean(networkObserverTarget) && networkObserverTarget === chrome.webRequest?.onResponseStarted
+  Boolean(networkObserverTarget) && networkObserverTarget === chrome.webRequest?.onResponseStarted

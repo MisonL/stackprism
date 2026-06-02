@@ -10,56 +10,30 @@ import {
   getAgentCaptureState,
   listAgentCaptureIds,
   reconcileAgentCaptureDeadlines,
-  removeAgentCaptureState,
   saveAgentCaptureState,
   type AgentCaptureState
 } from './agent-capture-state'
 import { normalizeComparableUrl, validateAgentCaptureRequest } from './agent-capture-request'
-import {
-  CAPTURE_DEADLINE_MS,
-  makeAgentCaptureError,
-  mapCaughtErrorCode,
-  nonTerminalStatuses,
-  PROFILE_TRANSFER_DEADLINE_MS,
-  runningStatuses
-} from './agent-capture-common'
+import { CAPTURE_DEADLINE_MS, makeAgentCaptureError, mapCaughtErrorCode, nonTerminalStatuses } from './agent-capture-common'
 import type { AgentCaptureResponse } from './agent-capture-common'
-import {
-  cleanupTarget,
-  cleanForCapture,
-  captureVisibleViewportScreenshot,
-  executeExperienceProfiler,
-  getAgentCaptureUserAgent,
-  getExtensionVersion,
-  reloadTargetTabBypassingCache,
-  resolveTargetTab,
-  waitForTargetTabLoaded
-} from './agent-capture-target'
-import { validateAgentCaptureNetwork, waitForAgentCaptureNetworkEvidence } from './agent-capture-network'
+import { resolveTargetTab } from './agent-capture-target'
 import {
   clearProfileTransferPort,
   registerAgentProfileTransferPort,
-  sendProfileToBridge,
   setAgentCaptureFailureHandler,
   waitForProfileTransferPort
 } from './agent-capture-transfer'
-import { failAgentCaptureWithPoster, reportCleanupFailure } from './agent-capture-failure'
+import { reportCleanupFailure } from './agent-capture-failure'
 import { postCaptureStatusToBridge } from './agent-capture-status'
-import { runAgentPageDetection } from './detection'
-import { loadDetectorSettings } from './detector-settings'
-import { buildPopupRawResult } from './popup-cache'
-import { getTabData, getTabSnapshot } from './tab-store'
-import { buildSiteExperienceProfile } from '@/utils/site-experience-profile'
-import { isAgentBridgePageUrl, isDetectablePageUrl } from '@/utils/page-support'
+import { cleanupStoredCaptureAndSession, cleanupTargetAndReport, failAgentCapture, getCaptureFailureDetails } from './agent-capture-lifecycle'
+import { runCapture } from './agent-capture-runner'
+import { isAgentBridgePageUrl } from '@/utils/page-support'
 import type { AgentBridgeError, AgentBridgeRuntimeMessage, AgentCaptureRequest, StartAgentCaptureMessage } from '@/types/agent-bridge'
-import { logBackgroundError, sanitizeLogDetails } from './logging'
+import { logBackgroundError } from './logging'
 
 export { registerAgentProfileTransferPort }
 
-const MAX_FAILURE_REASON_CHARS = 240
 let startCaptureMutation: Promise<void> = Promise.resolve()
-
-type CaptureFailureError = Error & { details?: Record<string, unknown> }
 
 type PreparedAgentCapture = { ok: true; state: AgentCaptureState; request: AgentCaptureRequest } | { ok: false; error: AgentBridgeError }
 
@@ -80,158 +54,9 @@ const withStartCaptureLock = async <T>(work: () => Promise<T>): Promise<T> => {
   }
 }
 
-const sanitizeFailureReason = (caught: unknown): string => {
-  const rawReason = caught instanceof Error ? caught.message || caught.name : String(caught || '')
-  const sanitized = sanitizeLogDetails({ reason: rawReason }).reason
-  return String(sanitized || 'unknown').slice(0, MAX_FAILURE_REASON_CHARS)
-}
-
-const makeCaptureFailureError = (code: AgentBridgeError['code'], caught?: unknown): CaptureFailureError => {
-  const error = new Error(code) as CaptureFailureError
-  if (caught !== undefined) error.details = { reason: sanitizeFailureReason(caught) }
-  return error
-}
-
-const getCaptureFailureDetails = (caught: unknown): Record<string, unknown> => {
-  if (!(caught instanceof Error) || !('details' in caught)) return {}
-  const details = caught.details
-  return details && typeof details === 'object' && !Array.isArray(details) ? (details as Record<string, unknown>) : {}
-}
-
-const shouldContinueCapture = async (state: AgentCaptureState): Promise<boolean> => {
-  const latest = await getAgentCaptureState(state.captureId)
-  return Boolean(latest && runningStatuses.has(latest.status))
-}
-
-const cleanupTargetAndReport = async (state: AgentCaptureState): Promise<void> => {
-  await cleanupTarget(state).catch(caught => reportCleanupFailure('cleanupTarget', caught))
-}
-
-const cleanupStoredCaptureAndSession = async (state: AgentCaptureState): Promise<void> => {
-  await removeAgentCaptureState(state.captureId).catch(caught => reportCleanupFailure('removeAgentCaptureState', caught))
-  await clearBridgeSession(state.bridgeTabId).catch(caught => reportCleanupFailure('clearBridgeSession', caught))
-}
-
-const failAgentCapture = async (
-  state: AgentCaptureState,
-  code: AgentBridgeError['code'],
-  message: string = code,
-  details: Record<string, unknown> = {},
-  notifyBridge = true
-): Promise<void> => {
-  const latest = await getAgentCaptureState(state.captureId)
-  if (!latest || !nonTerminalStatuses.has(latest.status)) return
-  state = latest
-  await failAgentCaptureWithPoster(state, code, postCaptureStatusToBridge, message, details, notifyBridge)
-}
-
 setAgentCaptureFailureHandler(async (state, code, message, details, notifyBridge) => {
   await failAgentCapture(state, code, message, details, notifyBridge)
 })
-
-const runCapture = async (state: AgentCaptureState, request: AgentCaptureRequest, capabilities: any): Promise<void> => {
-  try {
-    if (!state.targetTabId) throw new Error('TARGET_TAB_CLOSED')
-    const targetTabId = state.targetTabId
-    if (request.options.forceRefresh) {
-      state.targetNetwork = undefined
-      state.targetNetworkObservedAfter = Date.now()
-      state.updatedAt = state.targetNetworkObservedAfter
-      await saveAgentCaptureState(state)
-    }
-    const loadedTab = request.options.forceRefresh
-      ? await reloadTargetTabBypassingCache(targetTabId, state.deadlineAt)
-      : await waitForTargetTabLoaded(targetTabId, state.deadlineAt)
-    if (!(await shouldContinueCapture(state))) return
-    const targetTab = {
-      id: loadedTab.id ?? state.targetTabId,
-      url: loadedTab.url || '',
-      title: loadedTab.title || ''
-    }
-    const finalUrl = normalizeComparableUrl(targetTab.url)
-    if (!finalUrl || !isDetectablePageUrl(finalUrl)) throw new Error('FINAL_URL_BLOCKED')
-    state.finalUrl = finalUrl
-    state.phase = 'target_loaded'
-    state.updatedAt = Date.now()
-    await saveAgentCaptureState(state)
-    state = await waitForAgentCaptureNetworkEvidence(state)
-    const settings = await loadDetectorSettings()
-    const networkError = validateAgentCaptureNetwork(state, request, {
-      allowAllNetworkTargets: settings.agentBridgeAllowAllNetworkTargets === true
-    })
-    if (networkError) {
-      await failAgentCapture(state, networkError.code, networkError.message, networkError.details || {})
-      return
-    }
-    await postCaptureStatusToBridge(state, 'running', 'target_loaded', {
-      finalUrl,
-      targetNetworkAddress: state.targetNetwork?.ip,
-      targetNetworkFromCache: state.targetNetwork?.fromCache
-    })
-
-    const shouldRunTech = request.include.includes('tech')
-    const shouldRunExperience = request.include.some(section => section !== 'tech')
-    if (request.options.forceRefresh) await cleanForCapture(targetTabId)
-    if (!(await shouldContinueCapture(state))) return
-    if (shouldRunTech) {
-      try {
-        await runAgentPageDetection(targetTabId, state.deadlineAt)
-      } catch (caught) {
-        throw makeCaptureFailureError(mapCaughtErrorCode(caught, 'TARGET_INJECTION_FAILED'), caught)
-      }
-    }
-    if (request.waitMs > 0) await new Promise(resolve => setTimeout(resolve, Math.min(request.waitMs, 30000)))
-    if (!(await shouldContinueCapture(state))) return
-    let experience = null
-    if (shouldRunExperience) {
-      try {
-        experience = await executeExperienceProfiler(targetTabId, {
-          captureScreenshotMetadata: request.options.captureScreenshotMetadata
-        })
-      } catch (caught) {
-        throw makeCaptureFailureError('TARGET_INJECTION_FAILED', caught)
-      }
-    }
-    const [data, tab] = await Promise.all([getTabData(targetTabId), getTabSnapshot(targetTabId)])
-    const raw = shouldRunTech ? await buildPopupRawResult(data, settings, tab) : null
-    const capturedAt = new Date().toISOString()
-    const screenshotResult =
-      request.options.captureScreenshot && request.include.includes('visual')
-        ? await captureVisibleViewportScreenshot(targetTabId, state.targetWindowId || state.bridgeWindowId, state.bridgeTabId)
-        : { screenshot: null, limitations: [] }
-    if (!(await shouldContinueCapture(state))) return
-    const profile = buildSiteExperienceProfile({
-      captureId: state.captureId,
-      request,
-      raw,
-      experience,
-      capabilities,
-      screenshot: screenshotResult.screenshot,
-      limitations: screenshotResult.limitations,
-      finalUrl,
-      userAgent: getAgentCaptureUserAgent(),
-      extensionVersion: getExtensionVersion(),
-      capturedAt,
-      pageSupported: true
-    })
-    state.phase = 'posting_profile'
-    state.profileTransferDeadlineAt = Date.now() + PROFILE_TRANSFER_DEADLINE_MS
-    await saveAgentCaptureState(state)
-    if (!(await shouldContinueCapture(state))) return
-    await sendProfileToBridge(state, profile)
-    state.status = 'completed'
-    state.phase = 'cleanup'
-    state.updatedAt = Date.now()
-    await saveAgentCaptureState(state)
-    clearProfileTransferPort(state)
-  } catch (caught) {
-    const code = mapCaughtErrorCode(caught, 'PROFILE_TRANSPORT_FAILED')
-    await failAgentCapture(state, code, code, getCaptureFailureDetails(caught))
-    return
-  }
-  await cleanupTargetAndReport(state)
-  await cleanupStoredCaptureAndSession(state)
-}
 
 const loadActiveAgentCaptureStates = async (): Promise<AgentCaptureState[]> => {
   const states = await Promise.all((await listAgentCaptureIds()).map(getAgentCaptureState))

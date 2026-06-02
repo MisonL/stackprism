@@ -116,6 +116,7 @@ export const reloadTargetTabBypassingCache = async (tabId: number, deadlineAt: n
   return new Promise((resolve, reject) => {
     let settled = false
     let reloadStarted = false
+    let reloadCommandSettled = false
     let timeout: ReturnType<typeof setTimeout> | null = null
     let completeWithoutLoadingTimer: ReturnType<typeof setTimeout> | null = null
     const clearCompleteWithoutLoadingTimer = () => {
@@ -143,6 +144,7 @@ export const reloadTargetTabBypassingCache = async (tabId: number, deadlineAt: n
         return
       }
       if (changeInfo.status !== 'complete') return
+      if (!reloadCommandSettled && !reloadStarted) return
       if (reloadStarted) {
         finish(() => resolve(tab))
         return
@@ -166,6 +168,9 @@ export const reloadTargetTabBypassingCache = async (tabId: number, deadlineAt: n
     timeout = setTimeout(() => finish(() => reject(new Error('TARGET_LOAD_TIMEOUT'))), timeoutMs)
     chrome.tabs
       .reload(tabId, { bypassCache: true })
+      .then(() => {
+        reloadCommandSettled = true
+      })
       .catch(error => finish(() => reject(error)))
   })
 }
