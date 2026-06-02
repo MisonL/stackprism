@@ -199,7 +199,7 @@ print(json.dumps({
 server.server_close()
 `)
     assert.equal(resourcePolicy.request_queue_size, 20)
-    assert.equal(resourcePolicy.timeout, 10)
+    assert.equal(resourcePolicy.timeout, 35)
     assert.equal(resourcePolicy.create_limit, 10)
     assert.equal(resourcePolicy.query_limit, 120)
   } finally {
@@ -538,6 +538,7 @@ checks = {
     ),
     "invalid_url": open_browser("http://127.0.0.1:1/bridge\\nnext", {"STACKPRISM_BRIDGE_NO_OPEN": "1"}),
     "missing_command": open_browser("http://127.0.0.1:1/bridge", {"STACKPRISM_BROWSER_OPEN_COMMAND": "/definitely/missing/stackprism-browser"}),
+    "invalid_timeout": open_browser("http://127.0.0.1:1/bridge", {"STACKPRISM_BROWSER_OPEN_COMMAND": "python3", "STACKPRISM_BROWSER_OPEN_TIMEOUT_MS": "30001"}),
 }
 open_browser_module.subprocess.run = timeout_run
 checks["open_timeout"] = open_browser("http://127.0.0.1:1/bridge", {"STACKPRISM_BROWSER_OPEN_COMMAND": "python3"})
@@ -547,6 +548,7 @@ print(json.dumps({name: result for name, result in checks.items()}, sort_keys=Tr
   assert.deepEqual(parsed.nul_json_args, [false, { reason: 'BRIDGE_INVALID_ENV', message: 'Browser open environment contains NUL.' }])
   assert.deepEqual(parsed.invalid_url, [false, { reason: 'invalid_url' }])
   assert.deepEqual(parsed.missing_command, [false, { reason: 'command_not_found' }])
+  assert.deepEqual(parsed.invalid_timeout, [false, { reason: 'invalid_open_timeout' }])
   assert.deepEqual(parsed.open_timeout, [false, { reason: 'open_timeout' }])
 })
 
@@ -1565,23 +1567,6 @@ test('python fallback restricts bridge-token terminal status updates', async () 
     assert.equal(failedWithoutError.status, 400)
     assert.equal(failedWithoutError.body.error.code, 'INVALID_REQUEST')
 
-    const failedWrongPhase = await readJson(
-      await fetch(statusUrl, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${config.bridgeToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(
-          statusBody(created.body.id, config, {
-            status: 'failed',
-            phase: 'target_opening',
-            sequence: 1,
-            error: { code: 'TARGET_TAB_CLOSED', message: 'Target closed.' }
-          })
-        )
-      })
-    )
-    assert.equal(failedWrongPhase.status, 400)
-    assert.equal(failedWrongPhase.body.error.code, 'INVALID_REQUEST')
-
     const failedUnknownCode = await readJson(
       await fetch(statusUrl, {
         method: 'POST',
@@ -1600,24 +1585,25 @@ test('python fallback restricts bridge-token terminal status updates', async () 
     assert.equal(failedUnknownCode.body.error.code, 'INVALID_REQUEST')
 
     const failedError = sensitiveFailedError(ready, created, config)
-    const failed = await readJson(
+    const failedAtTargetOpening = await readJson(
       await fetch(statusUrl, {
         method: 'POST',
         headers: { Authorization: `Bearer ${config.bridgeToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(
           statusBody(created.body.id, config, {
             status: 'failed',
-            phase: 'cleanup',
+            phase: 'target_opening',
             sequence: 1,
             error: failedError
           })
         )
       })
     )
-    assert.equal(failed.status, 200)
-    assert.equal(failed.body.status, 'failed')
-    assert.equal(failed.body.error.code, 'TARGET_TAB_CLOSED')
-    assertErrorIsRedacted(failed.body.error, [ready.apiToken, config.bridgeToken, config.nonce])
+    assert.equal(failedAtTargetOpening.status, 200)
+    assert.equal(failedAtTargetOpening.body.status, 'failed')
+    assert.equal(failedAtTargetOpening.body.phase, 'target_opening')
+    assert.equal(failedAtTargetOpening.body.error.code, 'TARGET_TAB_CLOSED')
+    assertErrorIsRedacted(failedAtTargetOpening.body.error, [ready.apiToken, config.bridgeToken, config.nonce])
   } finally {
     child.kill('SIGTERM')
     await once(child, 'exit')
@@ -1901,6 +1887,7 @@ clock["now"] = 2000
 target_opening, _status, _err = store.create(request)
 target_opening["status"] = "running"
 target_opening["phase"] = "target_opening"
+target_deadline_ms = int((target_opening["deadlineAt"] - target_opening["createdAt"]) * 1000)
 clock["now"] = target_opening["deadlineAt"] + 1
 store.active_count()
 clock["now"] = 3000
@@ -1909,11 +1896,12 @@ running["status"] = "running"
 running["phase"] = "profiling_experience"
 clock["now"] = running["deadlineAt"] + 1
 store.active_count()
-print(json.dumps({"queued": queued["error"]["code"], "target_opening": target_opening["error"]["code"], "running": running["error"]["code"]}, sort_keys=True))
+print(json.dumps({"queued": queued["error"]["code"], "target_opening": target_opening["error"]["code"], "running": running["error"]["code"], "target_deadline_ms": target_deadline_ms}, sort_keys=True))
 `)
   assert.equal(parsed.queued, 'EXTENSION_NOT_CONNECTED')
   assert.equal(parsed.target_opening, 'TARGET_LOAD_TIMEOUT')
   assert.equal(parsed.running, 'CAPTURE_TIMEOUT')
+  assert.equal(parsed.target_deadline_ms, 95000)
 })
 
 test('python fallback actively expires completed profiles without a later request', () => {
@@ -2429,7 +2417,7 @@ test('python fallback rejects private final URLs before profile creation', async
       })
     )
     assert.equal(status.body.status, 'failed')
-    assert.equal(status.body.phase, 'cleanup')
+    assert.equal(status.body.phase, 'target_loaded')
     assert.equal(status.body.error.code, 'FINAL_URL_BLOCKED')
 
     const lateProfile = await readJson(

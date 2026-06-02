@@ -1,6 +1,7 @@
 # Local dependencies and caches
 node_modules/
 .cache/
+cache/
 .parcel-cache/
 .vite/
 docs/.vitepress/cache/

@@ -10,10 +10,15 @@ import vm from 'node:vm'
 import { bridgePageScript } from '../agent-skill/stackprism-site-experience/scripts/bridge/bridge-page-assets.mjs'
 import { CaptureStore } from '../agent-skill/stackprism-site-experience/scripts/bridge/capture-store.mjs'
 import { createBridgeServer } from '../agent-skill/stackprism-site-experience/scripts/bridge/http-server.mjs'
-import { openBrowser, resolveBrowserOpenCommand } from '../agent-skill/stackprism-site-experience/scripts/bridge/open-browser.mjs'
+import {
+  openBrowser,
+  parseOpenTimeoutMs,
+  resolveBrowserOpenCommand
+} from '../agent-skill/stackprism-site-experience/scripts/bridge/open-browser.mjs'
 import { htmlEscapeScriptJson, isValidId, safeEqual } from '../agent-skill/stackprism-site-experience/scripts/bridge/protocol.mjs'
 import { readJson as readBridgeRequestJson, rejectBadRequestShell } from '../agent-skill/stackprism-site-experience/scripts/bridge/security.mjs'
 import { normalizeCaptureRequest } from '../agent-skill/stackprism-site-experience/scripts/bridge/url-policy.mjs'
+import { parseTerminalSettleMs } from '../agent-skill/stackprism-site-experience/scripts/capture-runtime.mjs'
 import identifiers from './fixtures/bridge-protocol-identifiers.json' with { type: 'json' }
 import urlPolicyCases from './fixtures/bridge-url-policy-cases.json' with { type: 'json' }
 
@@ -100,7 +105,7 @@ const createFakeBridgeElement = (document, id = '') => ({
   }
 })
 
-const createBridgeScriptHarness = async () => {
+const createBridgeScriptHarness = async (options = {}) => {
   const ids = [
     'status',
     'stateLabel',
@@ -207,34 +212,37 @@ const createBridgeScriptHarness = async () => {
       return { height: 1, width: 1, close: () => {} }
     },
     document,
-    fetch: async () => ({
-      ok: true,
-      json: async () => ({
-        status: 'completed',
-        phase: 'cleanup',
-        preview: {
-          contentSummary: { cards: [{ title: '视觉', items: ['清晰的双列布局'] }] },
-          copyText: 'StackPrism profile summary',
-          screenshot: {
-            byteLength: 12,
-            dataUrl: `data:image/webp;base64,${Buffer.from('webp').toString('base64')}`,
-            mimeType: 'image/webp',
-            scope: 'viewport'
-          },
-          targetUrl: 'https://example.test/page'
-        }
-      })
-    }),
+    fetch:
+      options.fetch ||
+      (async () => ({
+        ok: true,
+        json: async () => ({
+          status: 'completed',
+          phase: 'cleanup',
+          preview: {
+            contentSummary: { cards: [{ title: '视觉', items: ['清晰的双列布局'] }] },
+            copyText: 'StackPrism profile summary',
+            screenshot: {
+              byteLength: 12,
+              dataUrl: `data:image/webp;base64,${Buffer.from('webp').toString('base64')}`,
+              mimeType: 'image/webp',
+              scope: 'viewport'
+            },
+            targetUrl: 'https://example.test/page'
+          }
+        })
+      })),
     navigator: {
       clipboard: {
         write: async items => writtenItems.push(...items),
         writeText: async value => writtenText.push(value)
       }
     },
-    setTimeout: () => 0
+    setTimeout: options.setTimeout || (() => 0)
   })
-  vm.runInContext(bridgePageScript, context)
-  for (let attempt = 0; attempt < 5 && elements.bridgeCard.dataset.status !== 'completed'; attempt += 1) {
+  vm.runInContext(`${bridgePageScript}\nthis.__stackprismPollForTest=poll;`, context)
+  const isReady = options.isReady || (status => status === 'completed')
+  for (let attempt = 0; attempt < 5 && !isReady(elements.bridgeCard.dataset.status); attempt += 1) {
     await new Promise(resolve => setImmediate(resolve))
   }
   return { context, document, elements, steps, writtenItems, writtenText }
@@ -429,6 +437,36 @@ test('bridge page script supports screenshot actions and modal focus loop', asyn
   assert.equal(document.activeElement, elements.bridgeCard)
 })
 
+test('bridge page script keeps terminal failure visible after bridge disconnect', async () => {
+  const responses = [
+    {
+      status: 'failed',
+      phase: 'target_loaded',
+      error: { code: 'PRIVATE_NETWORK_TARGET_BLOCKED' },
+      preview: { targetUrl: 'https://linear.app/' }
+    }
+  ]
+  let fetchCalls = 0
+  const { elements, steps } = await createBridgeScriptHarness({
+    fetch: async () => {
+      fetchCalls += 1
+      if (!responses.length) throw new Error('bridge closed')
+      return { ok: true, json: async () => responses.shift() }
+    },
+    isReady: status => status === 'failed'
+  })
+  assert.equal(fetchCalls, 1)
+
+  await elements.__stackprismPollForTest?.()
+
+  assert.equal(elements.bridgeCard.dataset.status, 'failed')
+  assert.equal(elements.bridgeCard.dataset.phase, 'target_loaded')
+  assert.equal(elements.stateLabel.textContent, '采集失败')
+  assert.equal(elements.status.textContent, 'PRIVATE_NETWORK_TARGET_BLOCKED')
+  assert.equal(elements.stepSummary.textContent, '结果：采集失败 - 目标页面已加载')
+  assert.equal(steps[3].classList.contains('failed'), true)
+})
+
 const percentEncodeFirstPayloadChar = value =>
   `${value.slice(0, 2)}%${value.charCodeAt(2).toString(16).toUpperCase().padStart(2, '0')}${value.slice(3)}`
 
@@ -517,7 +555,7 @@ test('js bridge serves health and creates no-open captures with bearer auth', as
     assert.match(ready.apiToken, /^spb_[A-Za-z0-9_-]{43}$/)
     assert.equal(ready.server.maxConnections, 20)
     assert.equal(ready.server.headersTimeout, 5000)
-    assert.equal(ready.server.requestTimeout, 10000)
+    assert.equal(ready.server.requestTimeout, 35000)
     assert.equal(ready.server.keepAliveTimeout, 2000)
 
     const health = await readJson(await fetch(ready.healthUrl))
@@ -1312,6 +1350,7 @@ test('capture store distinguishes extension, target load, and running timeouts',
   const targetOpening = store.create(baseCaptureRequest).capture
   targetOpening.status = 'running'
   targetOpening.phase = 'target_opening'
+  assert.equal(targetOpening.deadlineAt - targetOpening.createdAt, 95000)
   now = targetOpening.deadlineAt + 1
   store.pruneExpiredResults()
   assert.equal(targetOpening.status, 'failed')
@@ -1391,12 +1430,25 @@ test('js bridge factory validates browser open environment before server bind', 
 })
 
 test('js bridge open-browser helper validates parsed env before spawning', () => {
+  assert.deepEqual(parseOpenTimeoutMs({}), { ok: true, timeoutMs: 5000 })
+  assert.deepEqual(parseOpenTimeoutMs({ STACKPRISM_BROWSER_OPEN_TIMEOUT_MS: '250' }), { ok: true, timeoutMs: 250 })
+  assert.deepEqual(parseOpenTimeoutMs({ STACKPRISM_BROWSER_OPEN_TIMEOUT_MS: '99' }), {
+    ok: false,
+    details: { reason: 'invalid_open_timeout' }
+  })
+
   const result = openBrowser('http://127.0.0.1:1/bridge', {
     STACKPRISM_BROWSER_OPEN_COMMAND: process.execPath,
     STACKPRISM_BROWSER_OPEN_ARGS_JSON: JSON.stringify(['bad\0arg'])
   })
 
   assert.deepEqual(result, { ok: false, details: { reason: 'BRIDGE_INVALID_ENV', message: 'Browser open environment contains NUL.' } })
+
+  const invalidTimeout = openBrowser('http://127.0.0.1:1/bridge', {
+    STACKPRISM_BROWSER_OPEN_COMMAND: process.execPath,
+    STACKPRISM_BROWSER_OPEN_TIMEOUT_MS: '30001'
+  })
+  assert.deepEqual(invalidTimeout, { ok: false, details: { reason: 'invalid_open_timeout' } })
 
   const invalidUrl = openBrowser('http://127.0.0.1:1/bridge\nnext', { STACKPRISM_BRIDGE_NO_OPEN: '1' })
   assert.deepEqual(invalidUrl, { ok: false, details: { reason: 'invalid_url' } })
@@ -1559,6 +1611,16 @@ test('bridge cli exits and closes listener on SIGTERM', async () => {
   await assert.rejects(() => fetch(ready.healthUrl), /fetch failed/)
 })
 
+test('capture-site helper terminal settle parser defaults invalid nullable values', () => {
+  assert.equal(parseTerminalSettleMs(undefined), 1500)
+  assert.equal(parseTerminalSettleMs(null), 1500)
+  assert.equal(parseTerminalSettleMs(''), 1500)
+  assert.equal(parseTerminalSettleMs('0'), 0)
+  assert.equal(parseTerminalSettleMs('5000'), 5000)
+  assert.equal(parseTerminalSettleMs('5001'), 1500)
+  assert.equal(parseTerminalSettleMs('invalid'), 1500)
+})
+
 test('capture-site helper keeps bridge stdin open and writes profile artifacts', async () => {
   const tempDir = mkdtempSync(join(tmpdir(), 'stackprism-capture-site-'))
   const fakeBridgePath = join(tempDir, 'fake-bridge.mjs')
@@ -1585,6 +1647,8 @@ let requestBody = null
 let profile = ${JSON.stringify(fakeProfile)}
 let statusReads = 0
 let stdinEnded = false
+let completedAt = 0
+let stdinEndedAt = 0
 const token = 'spb_${'a'.repeat(43)}'
 const server = http.createServer((req, res) => {
   const chunks = []
@@ -1601,6 +1665,7 @@ const server = http.createServer((req, res) => {
     }
     if (req.url === '/v1/captures/' + captureId) {
       statusReads += 1
+      if (statusReads >= 2 && !completedAt) completedAt = Date.now()
       return send(200, { id: captureId, status: statusReads < 2 ? 'running' : 'completed', phase: statusReads < 2 ? 'target_loaded' : 'cleanup' })
     }
     if (req.url === '/v1/captures/' + captureId + '/profile') {
@@ -1624,7 +1689,8 @@ server.listen(0, '127.0.0.1', () => {
 })
 process.stdin.on('end', () => {
   stdinEnded = true
-  writeFileSync(logPath, JSON.stringify({ stdinEnded, requestBody, statusReads }))
+  stdinEndedAt = Date.now()
+  writeFileSync(logPath, JSON.stringify({ stdinEnded, requestBody, statusReads, completedAt, stdinEndedAt }))
   server.close(() => process.exit(0))
 })
 process.stdin.resume()
@@ -1648,7 +1714,7 @@ process.stdin.resume()
       ],
       {
         cwd: new URL('..', import.meta.url),
-        env: { ...process.env, STACKPRISM_CAPTURE_BRIDGE_SCRIPT: fakeBridgePath },
+        env: { ...process.env, STACKPRISM_CAPTURE_BRIDGE_SCRIPT: fakeBridgePath, STACKPRISM_CAPTURE_TERMINAL_SETTLE_MS: '50' },
         stdio: ['ignore', 'pipe', 'pipe']
       }
     )
@@ -1686,6 +1752,7 @@ process.stdin.resume()
     assert.equal(fakeBridgeLog.requestBody.options.captureScreenshot, true)
     assert.equal(fakeBridgeLog.requestBody.options.allowPrivateNetworkTarget, false)
     assert.equal(fakeBridgeLog.statusReads >= 2, true)
+    assert.equal(fakeBridgeLog.stdinEndedAt - fakeBridgeLog.completedAt >= 40, true)
   } finally {
     rmSync(tempDir, { recursive: true, force: true })
   }
@@ -2050,7 +2117,7 @@ test('js bridge rejects private final URLs before profile creation', async () =>
 
       const status = await readJson(await fetch(`${ready.baseUrl}/v1/captures/${created.body.id}`, { headers: auth(ready.apiToken) }))
       assert.equal(status.body.status, 'failed')
-      assert.equal(status.body.phase, 'cleanup')
+      assert.equal(status.body.phase, 'target_loaded')
       assert.equal(status.body.error.code, 'FINAL_URL_BLOCKED')
 
       const lateProfile = await readJson(
@@ -2330,23 +2397,6 @@ test('js bridge restricts bridge-token terminal status updates', async () => {
     assert.equal(failedWithoutError.status, 400)
     assert.equal(failedWithoutError.body.error.code, 'INVALID_REQUEST')
 
-    const failedWrongPhase = await readJson(
-      await fetch(statusUrl, {
-        method: 'POST',
-        headers: { ...auth(config.bridgeToken), 'Content-Type': 'application/json' },
-        body: JSON.stringify(
-          statusBody(created.body.id, config, {
-            status: 'failed',
-            phase: 'target_opening',
-            sequence: 1,
-            error: { code: 'TARGET_TAB_CLOSED', message: 'Target closed.' }
-          })
-        )
-      })
-    )
-    assert.equal(failedWrongPhase.status, 400)
-    assert.equal(failedWrongPhase.body.error.code, 'INVALID_REQUEST')
-
     const failedUnknownCode = await readJson(
       await fetch(statusUrl, {
         method: 'POST',
@@ -2365,24 +2415,25 @@ test('js bridge restricts bridge-token terminal status updates', async () => {
     assert.equal(failedUnknownCode.body.error.code, 'INVALID_REQUEST')
 
     const failedError = sensitiveFailedError(ready, created, config)
-    const failed = await readJson(
+    const failedAtTargetOpening = await readJson(
       await fetch(statusUrl, {
         method: 'POST',
         headers: { ...auth(config.bridgeToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(
           statusBody(created.body.id, config, {
             status: 'failed',
-            phase: 'cleanup',
+            phase: 'target_opening',
             sequence: 1,
             error: failedError
           })
         )
       })
     )
-    assert.equal(failed.status, 200)
-    assert.equal(failed.body.status, 'failed')
-    assert.equal(failed.body.error.code, 'TARGET_TAB_CLOSED')
-    assertErrorIsRedacted(failed.body.error, [ready.apiToken, config.bridgeToken, config.nonce])
+    assert.equal(failedAtTargetOpening.status, 200)
+    assert.equal(failedAtTargetOpening.body.status, 'failed')
+    assert.equal(failedAtTargetOpening.body.phase, 'target_opening')
+    assert.equal(failedAtTargetOpening.body.error.code, 'TARGET_TAB_CLOSED')
+    assertErrorIsRedacted(failedAtTargetOpening.body.error, [ready.apiToken, config.bridgeToken, config.nonce])
   })
 })
 

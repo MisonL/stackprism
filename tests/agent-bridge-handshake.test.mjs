@@ -77,7 +77,7 @@ test('bridge page parser validates loopback URL and JSON config token', async ()
 
   assert.equal(isBridgePageUrl(bridgeUrl), true)
   assert.equal(isBridgePageUrl('https://example.com/bridge'), false)
-  assert.equal(normalizeWritableStatusPhase('failed', 'bridge_connected'), 'cleanup')
+  assert.equal(normalizeWritableStatusPhase('failed', 'bridge_connected'), 'bridge_connected')
   assert.equal(normalizeWritableStatusPhase('failed'), 'cleanup')
   assert.equal(normalizeWritableStatusPhase('cancelled', 'target_loaded'), 'cleanup')
   assert.equal(normalizeWritableStatusPhase('running', 'target_loaded'), 'target_loaded')
@@ -276,7 +276,7 @@ test('bridge client posts request mismatch and never starts capture when request
 
     assert.deepEqual(runtimeMessages, [])
     assert.equal(statusPosts[0].status, 'failed')
-    assert.equal(statusPosts[0].phase, 'cleanup')
+    assert.equal(statusPosts[0].phase, 'bridge_connected')
     assert.equal(statusPosts[0].error.code, 'BRIDGE_REQUEST_MISMATCH')
     assert.deepEqual(
       bridgeRequests.map(request => ({
@@ -377,7 +377,7 @@ test('bridge client rejects incognito extension context before loading request o
 
     assert.deepEqual(runtimeMessages, [])
     assert.equal(statusPosts[0].status, 'failed')
-    assert.equal(statusPosts[0].phase, 'cleanup')
+    assert.equal(statusPosts[0].phase, 'bridge_connected')
     assert.equal(statusPosts[0].error.code, 'INCOGNITO_NOT_SUPPORTED')
     assert.deepEqual(
       bridgeRequests.map(request => request.url),
@@ -486,7 +486,7 @@ test('bridge client reports missing hello capabilities before starting capture',
     )
     assert.equal(statusPosts[0].status, 'waiting_extension')
     assert.equal(statusPosts[1].status, 'failed')
-    assert.equal(statusPosts[1].phase, 'cleanup')
+    assert.equal(statusPosts[1].phase, 'request_loaded')
     assert.equal(statusPosts[1].error.code, 'NOT_SUPPORTED')
     assert.equal(statusPosts[1].error.details.missingCapability, 'profileChunkTransport')
   } finally {

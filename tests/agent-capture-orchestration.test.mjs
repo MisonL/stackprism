@@ -119,6 +119,33 @@ const makeChrome = () => {
           tabs.push(tab)
           return tab
         },
+        reload: async tabId => {
+          const tab = tabs.find(item => item.id === tabId)
+          if (!tab) throw new Error('TAB_NOT_FOUND')
+          queueMicrotask(() => {
+            for (const listener of webRequestEvents.onResponseStarted) {
+              listener({
+                tabId,
+                requestId: `reload-${tabId}`,
+                url: tab.url,
+                type: 'main_frame',
+                method: 'GET',
+                statusCode: 200,
+                statusLine: 'HTTP/1.1 200 OK',
+                fromCache: false,
+                ip: '93.184.216.34'
+              })
+            }
+            tab.status = 'loading'
+            for (const listener of tabEvents.onUpdated) {
+              listener(tabId, { status: 'loading', url: tab.url }, tab)
+            }
+            tab.status = 'complete'
+            for (const listener of tabEvents.onUpdated) {
+              listener(tabId, { status: 'complete', url: tab.url }, tab)
+            }
+          })
+        },
         remove: async id => removedTabs.push(id),
         sendMessage: async (_tabId, message) => {
           messages.push(message)
@@ -433,6 +460,66 @@ test('agent capture network observer stays inactive when response-started API is
 
   assert.equal(await waitForAgentCaptureNetworkEvidence(state), state)
   assert.equal(validateAgentCaptureNetwork(state, baseRequest), null)
+  delete globalThis.chrome
+})
+
+test('agent capture network validation explains unverified browser evidence', async () => {
+  resetLoadTsModuleCaches()
+  const env = makeChrome()
+  globalThis.chrome = env.chrome
+  const { registerAgentCaptureNetworkObserver, validateAgentCaptureNetwork } = await loadTsModule('src/background/agent-capture-network.ts')
+  const state = {
+    captureId,
+    sessionId,
+    nonce,
+    bridgeOrigin: 'http://127.0.0.1:17370',
+    bridgeUrl: '',
+    bridgeTabId: 1,
+    bridgeWindowId: 1,
+    targetTabId: 2,
+    targetWindowId: 1,
+    targetUrl: baseRequest.url,
+    finalUrl: baseRequest.url,
+    targetMode: 'new_tab',
+    createdByCapture: true,
+    keepTabOpen: false,
+    phase: 'target_loaded',
+    status: 'running',
+    startedAt: Date.now(),
+    updatedAt: Date.now(),
+    deadlineAt: Date.now() + 1000
+  }
+
+  registerAgentCaptureNetworkObserver(() => assert.fail('network observer callback should not run'))
+
+  const missing = validateAgentCaptureNetwork(state, baseRequest)
+  assert.equal(missing.details.reason, 'target_network_address_unverified')
+  assert.equal(missing.details.verificationStatus, 'missing_main_frame_response')
+
+  const stale = validateAgentCaptureNetwork(
+    { ...state, targetNetwork: { url: baseRequest.url, ip: '93.184.216.34', fromCache: false, observedAt: state.startedAt - 1 } },
+    baseRequest
+  )
+  assert.equal(stale.details.verificationStatus, 'main_frame_response_stale')
+
+  const mismatched = validateAgentCaptureNetwork(
+    { ...state, targetNetwork: { url: 'https://example.com/other', ip: '93.184.216.34', fromCache: false, observedAt: Date.now() } },
+    baseRequest
+  )
+  assert.equal(mismatched.details.verificationStatus, 'main_frame_url_mismatch')
+  assert.equal(mismatched.details.observedUrlMatchesFinal, false)
+
+  const cached = validateAgentCaptureNetwork(
+    { ...state, targetNetwork: { url: baseRequest.url, ip: '93.184.216.34', fromCache: true, observedAt: Date.now() } },
+    baseRequest
+  )
+  assert.equal(cached.details.verificationStatus, 'main_frame_response_from_cache')
+
+  const missingAddress = validateAgentCaptureNetwork(
+    { ...state, targetNetwork: { url: baseRequest.url, fromCache: false, observedAt: Date.now() } },
+    baseRequest
+  )
+  assert.equal(missingAddress.details.verificationStatus, 'main_frame_response_missing_ip')
   delete globalThis.chrome
 })
 
@@ -1603,10 +1690,564 @@ test('agent capture fails closed when Chrome reports private target network addr
     env.messages,
     message => message.type === 'AGENT_CAPTURE_STATUS' && message.payload.error?.code === 'PRIVATE_NETWORK_TARGET_BLOCKED'
   )
+  assert.equal(failed.payload.phase, 'target_loaded')
   assert.equal(failed.payload.error.details.reason, 'private_network_address')
   assert.equal(failed.payload.error.details.address, '127.0.0.1')
   assert.equal(detectionAttempted, false)
   assert.deepEqual(await listAgentCaptureIds(), [])
+  delete globalThis.chrome
+})
+
+test('agent capture keeps target network evidence across tab loading updates', async () => {
+  resetLoadTsModuleCaches()
+  const env = makeChrome()
+  enableBridgeStatusAck(env)
+  enableFastHeaderFallback()
+  let detectionAttempted = false
+  env.chrome.tabs.create = async create => {
+    const tab = { id: 3, windowId: 1, url: create.url, title: 'Target', incognito: false, status: 'loading' }
+    env.tabs.push(tab)
+    queueMicrotask(() => {
+      for (const listener of env.webRequestEvents.onResponseStarted) {
+        listener({
+          tabId: 3,
+          requestId: 'target-main-frame',
+          url: create.url,
+          type: 'main_frame',
+          method: 'GET',
+          statusCode: 200,
+          statusLine: 'HTTP/1.1 200 OK',
+          fromCache: false,
+          ip: '93.184.216.34'
+        })
+      }
+      for (const listener of env.tabEvents.onUpdated) {
+        listener(3, { status: 'loading', url: tab.url }, tab)
+      }
+      tab.status = 'complete'
+      for (const listener of env.tabEvents.onUpdated) {
+        listener(3, { status: 'complete', url: tab.url }, tab)
+      }
+    })
+    return tab
+  }
+  env.chrome.scripting.executeScript = async () => {
+    detectionAttempted = true
+    return [{ result: { visual: {}, layout: {}, components: {}, interaction: {}, ux: {}, assets: {}, evidence: {} } }]
+  }
+  globalThis.chrome = env.chrome
+  const [{ registerBridgeSession }, { startAgentCapture, registerAgentProfileTransferPort }] = await Promise.all([
+    loadTsModule('src/background/agent-bridge-session.ts'),
+    loadTsModule('src/background/agent-capture.ts'),
+    loadTsModule('src/background/agent-capture-state.ts'),
+    loadTsModule('src/background/index.ts')
+  ])
+  await registerBridgeSession({
+    tabId: 1,
+    windowId: 1,
+    bridgeOrigin: 'http://127.0.0.1:17370',
+    sessionId,
+    captureId,
+    nonce
+  })
+  await connectProfileTransferPort(env, registerAgentProfileTransferPort)
+
+  const response = await startAgentCapture(
+    {
+      type: 'START_AGENT_CAPTURE',
+      captureId,
+      sessionId,
+      nonce,
+      bridgeOrigin: 'http://127.0.0.1:17370',
+      request: {
+        ...baseRequest,
+        include: ['tech'],
+        options: { ...baseRequest.options, targetMode: 'new_tab', forceRefresh: false }
+      },
+      capabilities: { ...fullCapabilities }
+    },
+    { url: `http://127.0.0.1:17370/bridge?session=${sessionId}&capture=${captureId}&nonce=${nonce}`, tab: { id: 1, windowId: 1 } }
+  )
+
+  assert.equal(response.ok, true)
+  const loaded = await waitForMessage(
+    env.messages,
+    message => message.type === 'AGENT_CAPTURE_STATUS' && message.payload.phase === 'target_loaded'
+  )
+  assert.equal(loaded.payload.targetNetworkAddress, '93.184.216.34')
+  assert.equal(loaded.payload.error, undefined)
+  assert.equal(detectionAttempted, true)
+  delete globalThis.chrome
+})
+
+test('agent capture force refresh reloads target with bypassCache before network validation', async () => {
+  resetLoadTsModuleCaches()
+  const env = makeChrome()
+  enableBridgeStatusAck(env)
+  enableFastHeaderFallback()
+  let detectionAttempted = false
+  const reloads = []
+  env.chrome.tabs.create = async create => {
+    const tab = { id: 3, windowId: 1, url: create.url, title: 'Target', incognito: false, status: 'complete' }
+    env.tabs.push(tab)
+    queueMicrotask(() => {
+      for (const listener of env.webRequestEvents.onResponseStarted) {
+        listener({
+          tabId: 3,
+          requestId: 'target-main-frame-cached',
+          url: create.url,
+          type: 'main_frame',
+          method: 'GET',
+          statusCode: 200,
+          statusLine: 'HTTP/1.1 200 OK',
+          fromCache: true,
+          ip: '93.184.216.33'
+        })
+      }
+    })
+    return tab
+  }
+  env.chrome.tabs.reload = async (tabId, options) => {
+    reloads.push({ tabId, options })
+    const tab = env.tabs.find(item => item.id === tabId)
+    for (const listener of env.tabEvents.onUpdated) {
+      listener(tabId, { title: 'Still old page' }, tab)
+    }
+    setTimeout(() => {
+      tab.status = 'loading'
+      for (const listener of env.tabEvents.onUpdated) {
+        listener(tabId, { status: 'loading', url: tab.url }, tab)
+      }
+      for (const listener of env.webRequestEvents.onResponseStarted) {
+        listener({
+          tabId,
+          requestId: 'target-main-frame-reloaded',
+          url: tab.url,
+          type: 'main_frame',
+          method: 'GET',
+          statusCode: 200,
+          statusLine: 'HTTP/1.1 200 OK',
+          fromCache: false,
+          ip: '93.184.216.34'
+        })
+      }
+      tab.status = 'complete'
+      for (const listener of env.tabEvents.onUpdated) {
+        listener(tabId, { status: 'complete', url: tab.url }, tab)
+      }
+    }, 0)
+  }
+  env.chrome.scripting.executeScript = async () => {
+    detectionAttempted = true
+    return [{ result: { visual: {}, layout: {}, components: {}, interaction: {}, ux: {}, assets: {}, evidence: {} } }]
+  }
+  globalThis.chrome = env.chrome
+  const [{ registerBridgeSession }, { startAgentCapture, registerAgentProfileTransferPort }] = await Promise.all([
+    loadTsModule('src/background/agent-bridge-session.ts'),
+    loadTsModule('src/background/agent-capture.ts'),
+    loadTsModule('src/background/agent-capture-state.ts'),
+    loadTsModule('src/background/index.ts')
+  ])
+  await registerBridgeSession({
+    tabId: 1,
+    windowId: 1,
+    bridgeOrigin: 'http://127.0.0.1:17370',
+    sessionId,
+    captureId,
+    nonce
+  })
+  await connectProfileTransferPort(env, registerAgentProfileTransferPort)
+
+  const response = await startAgentCapture(
+    {
+      type: 'START_AGENT_CAPTURE',
+      captureId,
+      sessionId,
+      nonce,
+      bridgeOrigin: 'http://127.0.0.1:17370',
+      request: {
+        ...baseRequest,
+        include: ['tech'],
+        options: { ...baseRequest.options, targetMode: 'new_tab', forceRefresh: true }
+      },
+      capabilities: { ...fullCapabilities }
+    },
+    { url: `http://127.0.0.1:17370/bridge?session=${sessionId}&capture=${captureId}&nonce=${nonce}`, tab: { id: 1, windowId: 1 } }
+  )
+
+  assert.equal(response.ok, true)
+  const loaded = await waitForMessage(
+    env.messages,
+    message => message.type === 'AGENT_CAPTURE_STATUS' && message.payload.phase === 'target_loaded'
+  )
+  assert.deepEqual(reloads, [{ tabId: 3, options: { bypassCache: true } }])
+  assert.equal(loaded.payload.targetNetworkAddress, '93.184.216.34')
+  assert.equal(loaded.payload.targetNetworkFromCache, false)
+  assert.equal(loaded.payload.error, undefined)
+  assert.equal(detectionAttempted, true)
+  delete globalThis.chrome
+})
+
+test('agent capture force refresh ignores stale complete before reload loading starts', async () => {
+  resetLoadTsModuleCaches()
+  const env = makeChrome()
+  enableBridgeStatusAck(env)
+  enableFastHeaderFallback()
+  const reloads = []
+  const detectionUrls = []
+  env.chrome.tabs.create = async create => {
+    const tab = { id: 3, windowId: 1, url: create.url, title: 'Target', incognito: false, status: 'complete' }
+    env.tabs.push(tab)
+    return tab
+  }
+  env.chrome.tabs.reload = async (tabId, options) => {
+    reloads.push({ tabId, options })
+    const tab = env.tabs.find(item => item.id === tabId)
+    for (const listener of env.tabEvents.onUpdated) {
+      listener(tabId, { status: 'complete', url: tab.url }, tab)
+    }
+    setTimeout(() => {
+      tab.url = 'https://example.com/app?view=one&fresh=1'
+      tab.status = 'loading'
+      for (const listener of env.tabEvents.onUpdated) {
+        listener(tabId, { status: 'loading', url: tab.url }, tab)
+      }
+      for (const listener of env.webRequestEvents.onResponseStarted) {
+        listener({
+          tabId,
+          requestId: 'target-main-frame-reloaded',
+          url: tab.url,
+          type: 'main_frame',
+          method: 'GET',
+          statusCode: 200,
+          statusLine: 'HTTP/1.1 200 OK',
+          fromCache: false,
+          ip: '93.184.216.34'
+        })
+      }
+      tab.status = 'complete'
+      for (const listener of env.tabEvents.onUpdated) {
+        listener(tabId, { status: 'complete', url: tab.url }, tab)
+      }
+    }, 0)
+  }
+  env.chrome.scripting.executeScript = async () => {
+    detectionUrls.push(env.tabs.find(tab => tab.id === 3)?.url)
+    return [{ result: { visual: {}, layout: {}, components: {}, interaction: {}, ux: {}, assets: {}, evidence: {} } }]
+  }
+  globalThis.chrome = env.chrome
+  const [{ registerBridgeSession }, { startAgentCapture, registerAgentProfileTransferPort }] = await Promise.all([
+    loadTsModule('src/background/agent-bridge-session.ts'),
+    loadTsModule('src/background/agent-capture.ts'),
+    loadTsModule('src/background/agent-capture-state.ts'),
+    loadTsModule('src/background/index.ts')
+  ])
+  await registerBridgeSession({
+    tabId: 1,
+    windowId: 1,
+    bridgeOrigin: 'http://127.0.0.1:17370',
+    sessionId,
+    captureId,
+    nonce
+  })
+  await connectProfileTransferPort(env, registerAgentProfileTransferPort)
+
+  const response = await startAgentCapture(
+    {
+      type: 'START_AGENT_CAPTURE',
+      captureId,
+      sessionId,
+      nonce,
+      bridgeOrigin: 'http://127.0.0.1:17370',
+      request: {
+        ...baseRequest,
+        include: ['tech'],
+        options: { ...baseRequest.options, targetMode: 'new_tab', forceRefresh: true }
+      },
+      capabilities: { ...fullCapabilities }
+    },
+    { url: `http://127.0.0.1:17370/bridge?session=${sessionId}&capture=${captureId}&nonce=${nonce}`, tab: { id: 1, windowId: 1 } }
+  )
+
+  assert.equal(response.ok, true)
+  const loaded = await waitForMessage(
+    env.messages,
+    message => message.type === 'AGENT_CAPTURE_STATUS' && message.payload.phase === 'target_loaded'
+  )
+  assert.deepEqual(reloads, [{ tabId: 3, options: { bypassCache: true } }])
+  assert.equal(loaded.payload.finalUrl, 'https://example.com/app?view=one&fresh=1')
+  assert.equal(detectionUrls[0], 'https://example.com/app?view=one&fresh=1')
+  delete globalThis.chrome
+})
+
+test('agent capture force refresh waits for delayed reload start before using complete state', async () => {
+  resetLoadTsModuleCaches()
+  const env = makeChrome()
+  enableBridgeStatusAck(env)
+  enableFastHeaderFallback()
+  const detectionUrls = []
+  env.chrome.tabs.create = async create => {
+    const tab = { id: 3, windowId: 1, url: create.url, title: 'Target', incognito: false, status: 'complete' }
+    env.tabs.push(tab)
+    return tab
+  }
+  env.chrome.tabs.reload = async tabId => {
+    const tab = env.tabs.find(item => item.id === tabId)
+    setTimeout(() => {
+      tab.url = 'https://example.com/app?view=one&fresh=delayed'
+      tab.status = 'loading'
+      for (const listener of env.tabEvents.onUpdated) {
+        listener(tabId, { status: 'loading', url: tab.url }, tab)
+      }
+      for (const listener of env.webRequestEvents.onResponseStarted) {
+        listener({
+          tabId,
+          requestId: 'target-main-frame-delayed-reload',
+          url: tab.url,
+          type: 'main_frame',
+          method: 'GET',
+          statusCode: 200,
+          statusLine: 'HTTP/1.1 200 OK',
+          fromCache: false,
+          ip: '93.184.216.34'
+        })
+      }
+      tab.status = 'complete'
+      for (const listener of env.tabEvents.onUpdated) {
+        listener(tabId, { status: 'complete', url: tab.url }, tab)
+      }
+    }, 20)
+  }
+  env.chrome.scripting.executeScript = async () => {
+    detectionUrls.push(env.tabs.find(tab => tab.id === 3)?.url)
+    return [{ result: { visual: {}, layout: {}, components: {}, interaction: {}, ux: {}, assets: {}, evidence: {} } }]
+  }
+  globalThis.chrome = env.chrome
+  const [{ registerBridgeSession }, { startAgentCapture, registerAgentProfileTransferPort }] = await Promise.all([
+    loadTsModule('src/background/agent-bridge-session.ts'),
+    loadTsModule('src/background/agent-capture.ts'),
+    loadTsModule('src/background/agent-capture-state.ts'),
+    loadTsModule('src/background/index.ts')
+  ])
+  await registerBridgeSession({
+    tabId: 1,
+    windowId: 1,
+    bridgeOrigin: 'http://127.0.0.1:17370',
+    sessionId,
+    captureId,
+    nonce
+  })
+  await connectProfileTransferPort(env, registerAgentProfileTransferPort)
+
+  const response = await startAgentCapture(
+    {
+      type: 'START_AGENT_CAPTURE',
+      captureId,
+      sessionId,
+      nonce,
+      bridgeOrigin: 'http://127.0.0.1:17370',
+      request: {
+        ...baseRequest,
+        include: ['tech'],
+        options: { ...baseRequest.options, targetMode: 'new_tab', forceRefresh: true }
+      },
+      capabilities: { ...fullCapabilities }
+    },
+    { url: `http://127.0.0.1:17370/bridge?session=${sessionId}&capture=${captureId}&nonce=${nonce}`, tab: { id: 1, windowId: 1 } }
+  )
+
+  assert.equal(response.ok, true)
+  const loaded = await waitForMessage(
+    env.messages,
+    message => message.type === 'AGENT_CAPTURE_STATUS' && message.payload.phase === 'target_loaded'
+  )
+  assert.equal(loaded.payload.finalUrl, 'https://example.com/app?view=one&fresh=delayed')
+  assert.equal(loaded.payload.targetNetworkAddress, '93.184.216.34')
+  assert.equal(detectionUrls[0], 'https://example.com/app?view=one&fresh=delayed')
+  delete globalThis.chrome
+})
+
+test('agent capture force refresh ignores same-url network evidence from before reload', async () => {
+  resetLoadTsModuleCaches()
+  const env = makeChrome()
+  enableBridgeStatusAck(env)
+  enableFastHeaderFallback()
+  const detectionUrls = []
+  env.chrome.tabs.create = async create => {
+    const tab = { id: 3, windowId: 1, url: create.url, title: 'Target', incognito: false, status: 'complete' }
+    env.tabs.push(tab)
+    queueMicrotask(() => {
+      for (const listener of env.webRequestEvents.onResponseStarted) {
+        listener({
+          tabId: 3,
+          requestId: 'target-main-frame-before-reload',
+          url: create.url,
+          type: 'main_frame',
+          method: 'GET',
+          statusCode: 200,
+          statusLine: 'HTTP/1.1 200 OK',
+          fromCache: true,
+          ip: '93.184.216.33'
+        })
+      }
+    })
+    return tab
+  }
+  env.chrome.tabs.reload = async tabId => {
+    const tab = env.tabs.find(item => item.id === tabId)
+    setTimeout(() => {
+      tab.status = 'loading'
+      for (const listener of env.tabEvents.onUpdated) {
+        listener(tabId, { status: 'loading', url: tab.url }, tab)
+      }
+      for (const listener of env.webRequestEvents.onResponseStarted) {
+        listener({
+          tabId,
+          requestId: 'target-main-frame-after-reload',
+          url: tab.url,
+          type: 'main_frame',
+          method: 'GET',
+          statusCode: 200,
+          statusLine: 'HTTP/1.1 200 OK',
+          fromCache: false,
+          ip: '93.184.216.34'
+        })
+      }
+      tab.status = 'complete'
+      for (const listener of env.tabEvents.onUpdated) {
+        listener(tabId, { status: 'complete', url: tab.url }, tab)
+      }
+    }, 20)
+  }
+  env.chrome.scripting.executeScript = async () => {
+    detectionUrls.push(env.tabs.find(tab => tab.id === 3)?.url)
+    return [{ result: { visual: {}, layout: {}, components: {}, interaction: {}, ux: {}, assets: {}, evidence: {} } }]
+  }
+  globalThis.chrome = env.chrome
+  const [{ registerBridgeSession }, { startAgentCapture, registerAgentProfileTransferPort }] = await Promise.all([
+    loadTsModule('src/background/agent-bridge-session.ts'),
+    loadTsModule('src/background/agent-capture.ts'),
+    loadTsModule('src/background/agent-capture-state.ts'),
+    loadTsModule('src/background/index.ts')
+  ])
+  await registerBridgeSession({
+    tabId: 1,
+    windowId: 1,
+    bridgeOrigin: 'http://127.0.0.1:17370',
+    sessionId,
+    captureId,
+    nonce
+  })
+  await connectProfileTransferPort(env, registerAgentProfileTransferPort)
+
+  const response = await startAgentCapture(
+    {
+      type: 'START_AGENT_CAPTURE',
+      captureId,
+      sessionId,
+      nonce,
+      bridgeOrigin: 'http://127.0.0.1:17370',
+      request: {
+        ...baseRequest,
+        include: ['tech'],
+        options: { ...baseRequest.options, targetMode: 'new_tab', forceRefresh: true }
+      },
+      capabilities: { ...fullCapabilities }
+    },
+    { url: `http://127.0.0.1:17370/bridge?session=${sessionId}&capture=${captureId}&nonce=${nonce}`, tab: { id: 1, windowId: 1 } }
+  )
+
+  assert.equal(response.ok, true)
+  const loaded = await waitForMessage(
+    env.messages,
+    message => message.type === 'AGENT_CAPTURE_STATUS' && message.payload.phase === 'target_loaded'
+  )
+  assert.equal(loaded.payload.targetNetworkAddress, '93.184.216.34')
+  assert.equal(loaded.payload.targetNetworkFromCache, false)
+  assert.equal(detectionUrls[0], 'https://example.com/app?view=one')
+  delete globalThis.chrome
+})
+
+test('agent capture force refresh accepts rapid complete reload without loading event', async () => {
+  resetLoadTsModuleCaches()
+  const env = makeChrome()
+  enableBridgeStatusAck(env)
+  enableFastHeaderFallback()
+  const detectionUrls = []
+  env.chrome.tabs.create = async create => {
+    const tab = { id: 3, windowId: 1, url: create.url, title: 'Target', incognito: false, status: 'complete' }
+    env.tabs.push(tab)
+    return tab
+  }
+  env.chrome.tabs.reload = async tabId => {
+    const tab = env.tabs.find(item => item.id === tabId)
+    setTimeout(() => {
+      tab.url = 'https://example.com/app?view=one&fresh=2'
+      for (const listener of env.webRequestEvents.onResponseStarted) {
+        listener({
+          tabId,
+          requestId: 'target-main-frame-rapid-reload',
+          url: tab.url,
+          type: 'main_frame',
+          method: 'GET',
+          statusCode: 200,
+          statusLine: 'HTTP/1.1 200 OK',
+          fromCache: false,
+          ip: '93.184.216.34'
+        })
+      }
+      tab.status = 'complete'
+      for (const listener of env.tabEvents.onUpdated) {
+        listener(tabId, { status: 'complete', url: tab.url }, tab)
+      }
+    }, 0)
+  }
+  env.chrome.scripting.executeScript = async () => {
+    detectionUrls.push(env.tabs.find(tab => tab.id === 3)?.url)
+    return [{ result: { visual: {}, layout: {}, components: {}, interaction: {}, ux: {}, assets: {}, evidence: {} } }]
+  }
+  globalThis.chrome = env.chrome
+  const [{ registerBridgeSession }, { startAgentCapture, registerAgentProfileTransferPort }] = await Promise.all([
+    loadTsModule('src/background/agent-bridge-session.ts'),
+    loadTsModule('src/background/agent-capture.ts'),
+    loadTsModule('src/background/agent-capture-state.ts'),
+    loadTsModule('src/background/index.ts')
+  ])
+  await registerBridgeSession({
+    tabId: 1,
+    windowId: 1,
+    bridgeOrigin: 'http://127.0.0.1:17370',
+    sessionId,
+    captureId,
+    nonce
+  })
+  await connectProfileTransferPort(env, registerAgentProfileTransferPort)
+
+  const response = await startAgentCapture(
+    {
+      type: 'START_AGENT_CAPTURE',
+      captureId,
+      sessionId,
+      nonce,
+      bridgeOrigin: 'http://127.0.0.1:17370',
+      request: {
+        ...baseRequest,
+        include: ['tech'],
+        options: { ...baseRequest.options, targetMode: 'new_tab', forceRefresh: true }
+      },
+      capabilities: { ...fullCapabilities }
+    },
+    { url: `http://127.0.0.1:17370/bridge?session=${sessionId}&capture=${captureId}&nonce=${nonce}`, tab: { id: 1, windowId: 1 } }
+  )
+
+  assert.equal(response.ok, true)
+  const loaded = await waitForMessage(
+    env.messages,
+    message => message.type === 'AGENT_CAPTURE_STATUS' && message.payload.phase === 'target_loaded'
+  )
+  assert.equal(loaded.payload.finalUrl, 'https://example.com/app?view=one&fresh=2')
+  assert.equal(loaded.payload.targetNetworkAddress, '93.184.216.34')
+  assert.equal(detectionUrls[0], 'https://example.com/app?view=one&fresh=2')
   delete globalThis.chrome
 })
 
