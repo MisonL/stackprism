@@ -24,24 +24,27 @@ test('experience profiler default export is structured-clone safe', async () => 
 })
 
 test('experience profiler preserves matched selector metadata for bounding boxes', async () => {
-  const source = await readFile(new URL('../src/injected/experience-profiler.ts', import.meta.url), 'utf8')
+  const source = await readFile(new URL('../src/injected/experience-profiler-visual-layout.ts', import.meta.url), 'utf8')
 
   assert.match(source, /map\(element => \(\{ selector, element \}\)\)/)
   assert.doesNotMatch(source, /selector:\s*element\.tagName/)
 })
 
 test('experience profiler collects language and first-order UX categories', async () => {
-  const source = await readFile(new URL('../src/injected/experience-profiler.ts', import.meta.url), 'utf8')
+  const [entrySource, uxSource] = await Promise.all([
+    readFile(new URL('../src/injected/experience-profiler.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/injected/experience-profiler-ux-assets.ts', import.meta.url), 'utf8')
+  ])
 
-  assert.match(source, /documentElement\.lang/)
-  assert.match(source, /pagePurpose/)
-  assert.match(source, /primaryUserPath/)
-  assert.match(source, /informationHierarchy/)
-  assert.match(source, /ctaStrategy/)
-  assert.match(source, /trustSignals/)
-  assert.match(source, /navigationDepth/)
-  assert.match(source, /contentGrouping/)
-  assert.match(source, /frictionPoints/)
+  assert.match(entrySource, /documentElement\.lang/)
+  assert.match(uxSource, /pagePurpose/)
+  assert.match(uxSource, /primaryUserPath/)
+  assert.match(uxSource, /informationHierarchy/)
+  assert.match(uxSource, /ctaStrategy/)
+  assert.match(uxSource, /trustSignals/)
+  assert.match(uxSource, /navigationDepth/)
+  assert.match(uxSource, /contentGrouping/)
+  assert.match(uxSource, /frictionPoints/)
 })
 
 test('site experience fixture covers visual, layout, component and sensitive text cases', async () => {
