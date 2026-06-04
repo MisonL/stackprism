@@ -47,6 +47,53 @@ test('experience profiler collects language and first-order UX categories', asyn
   assert.match(uxSource, /frictionPoints/)
 })
 
+test('experience profiler redacts sensitive URL paths and preserves full component counts', async () => {
+  const [commonSource, componentsSource, entrySource] = await Promise.all([
+    readFile(new URL('../src/injected/experience-profiler-common.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/injected/experience-profiler-components.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/injected/experience-profiler.ts', import.meta.url), 'utf8')
+  ])
+
+  assert.match(commonSource, /isSensitivePathSegment/)
+  assert.match(commonSource, /url\.pathname = redactPathname\(url\.pathname\)/)
+  assert.match(componentsSource, /counts\[type\] = matches\.length/)
+  assert.match(componentsSource, /matches\.slice\(0, 20\)/)
+  assert.match(entrySource, /for \(const shrink of shrinkSteps\)/)
+  assert.match(entrySource, /byteLengthOf\(profile\)/)
+  assert.match(entrySource, /initialBytes - bytes/)
+})
+
+test('experience profiler safeUrl preserves ordinary key substrings and redacts sensitive path tokens', async () => {
+  const { safeUrl } = await loadTsModule('src/injected/experience-profiler-common.ts')
+  const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location')
+  Object.defineProperty(globalThis, 'location', {
+    configurable: true,
+    value: { href: 'https://example.com/base/' }
+  })
+
+  try {
+    assert.equal(
+      safeUrl('https://example.com/products/keyboard/turkey/monkey?token=secret#frag'),
+      'https://example.com/products/keyboard/turkey/monkey?token=%5Bredacted%5D'
+    )
+    assert.equal(
+      safeUrl('https://example.com/account/apiKey/privateKey/passcode/sessionId?next=/home'),
+      'https://example.com/account/[redacted]/[redacted]/[redacted]/[redacted]?next=%5Bredacted%5D'
+    )
+    assert.equal(
+      safeUrl('https://vercel.com/dashboard/projects/very-long-project-name-with-token-like-segment-and-many-words'),
+      'https://vercel.com/dashboard/projects/very-long-project-name-with-token-like-segment-and-many-words'
+    )
+    assert.equal(
+      safeUrl('https://example.com/download/Abcd1234EFGH5678ijkl9012?next=/home'),
+      'https://example.com/download/[redacted]?next=%5Bredacted%5D'
+    )
+  } finally {
+    if (originalLocation) Object.defineProperty(globalThis, 'location', originalLocation)
+    else delete globalThis.location
+  }
+})
+
 test('site experience fixture covers visual, layout, component and sensitive text cases', async () => {
   const fixture = await readFile(new URL('./fixtures/site-experience-fixture.html', import.meta.url), 'utf8')
 

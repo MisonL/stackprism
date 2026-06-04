@@ -150,9 +150,12 @@ test('exports the first-version bridge error code contract', async () => {
     'STALE_STATUS_UPDATE',
     'PORT_IN_USE',
     'BRIDGE_INVALID_ENV',
+    'BRIDGE_START_FAILED',
     'BRIDGE_START_TIMEOUT',
     'BRIDGE_READY_PARSE_FAILED',
     'BRIDGE_PROTOCOL_UNSUPPORTED',
+    'BRIDGE_PAGE_RENDER_FAILED',
+    'BRIDGE_REQUEST_TIMEOUT',
     'BRIDGE_REQUEST_MISMATCH',
     'AGENT_BRIDGE_DISABLED',
     'CAPTURE_BUSY',
@@ -250,7 +253,7 @@ test('builds a redacted site experience profile from raw popup data and experien
   const profile = buildSiteExperienceProfile({
     captureId: 'cap_CCCCCCCCCCCCCCCCCCCCCC',
     request: {
-      url: 'https://example.com/app?token=secret#frag',
+      url: 'https://example.com/account/sessionId/reset-token?token=secret#frag',
       mode: 'experience',
       waitMs: 1000,
       include: ['tech', 'visual', 'layout', 'components', 'interaction', 'ux', 'assets'],
@@ -267,7 +270,7 @@ test('builds a redacted site experience profile from raw popup data and experien
       protocolVersion: 1
     },
     raw: {
-      url: 'https://example.com/app?token=secret#frag',
+      url: 'https://example.com/account/sessionId/reset-token?token=secret#frag',
       title: 'Dashboard',
       generatedAt: '2026-05-22T06:00:00.000Z',
       technologies: [
@@ -278,7 +281,7 @@ test('builds a redacted site experience profile from raw popup data and experien
           confidence: '高',
           sources: ['页面扫描'],
           evidence: ['window.__VUE__ token=secret'],
-          url: 'https://vuejs.org/?session=abc#docs'
+          url: 'https://vuejs.org/apiKey/privateKey?session=abc#docs'
         },
         {
           category: '实验',
@@ -289,13 +292,13 @@ test('builds a redacted site experience profile from raw popup data and experien
       ],
       resources: {
         total: 4,
-        scripts: ['https://cdn.example.com/app.js?signature=abc#bundle'],
-        stylesheets: ['https://cdn.example.com/app.css?theme=dark'],
-        themeAssetUrls: ['https://cdn.example.com/logo.png?auth=secret'],
+        scripts: ['https://cdn.example.com/assets/sessionId/app.js?signature=abc#bundle'],
+        stylesheets: ['https://cdn.example.com/privateKey/app.css?theme=dark'],
+        themeAssetUrls: ['https://cdn.example.com/logo/token-secret.png?auth=secret'],
         resourceDomains: [{ domain: 'cdn.example.com', count: 3 }],
         cssVariableCount: 12,
         metaGenerator: 'AcmeCMS',
-        manifest: 'https://example.com/manifest.json?key=secret'
+        manifest: 'https://example.com/apiKey/manifest.json?key=secret'
       },
       headers: [
         { name: 'authorization', value: 'Bearer secret' },
@@ -325,7 +328,7 @@ test('builds a redacted site experience profile from raw popup data and experien
         frictionPoints: ['Long table without visible filters'],
         textSamples: ['联系 user@example.com 或 13800138000，订单 1234567890123，金额 ￥199，联系人 张三']
       },
-      assets: { urls: ['https://cdn.example.com/private.woff2?token=abc#font'] },
+      assets: { urls: ['https://cdn.example.com/secretToken/private.woff2?token=abc#font'] },
       evidence: {
         inaccessibleStylesheets: 2,
         crossOriginIframes: 1,
@@ -333,7 +336,7 @@ test('builds a redacted site experience profile from raw popup data and experien
       }
     },
     capabilities,
-    finalUrl: 'https://example.com/app?session=abc#final'
+    finalUrl: 'https://example.com/account/sessionId/reset-token?session=abc#final'
   })
 
   const serialized = JSON.stringify(profile)
@@ -383,7 +386,7 @@ test('builds a redacted site experience profile from raw popup data and experien
   assert.equal(profile.agentGuidance.recreationPlan.verificationChecklist.length > 0, true)
   assert.deepEqual(profile.visualProfile.colorTokens, ['#123456'])
   assert.equal(profile.visualProfile.screenshot, undefined)
-  assert.doesNotMatch(serialized, /secret|Bearer|user@example\.com|13800138000|1234567890123|￥199|张三|preview=abc|#frag/)
+  assert.doesNotMatch(serialized, /secret|Bearer|user@example\.com|13800138000|1234567890123|￥199|张三|preview=abc|sessionId|apiKey|privateKey|reset-token|secretToken|#frag/)
   for (const url of [
     profile.target.url,
     profile.target.finalUrl,

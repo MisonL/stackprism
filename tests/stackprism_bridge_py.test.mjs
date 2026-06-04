@@ -19,6 +19,7 @@ const request = {
 }
 
 const readJson = async response => ({ status: response.status, body: await response.json(), headers: response.headers })
+const readBytes = async response => ({ status: response.status, body: Buffer.from(await response.arrayBuffer()), headers: response.headers })
 
 const sensitiveFailedError = (ready, created, config) => {
   const sensitiveUrl = `${created.body.bridgeUrl}&token=secret&apiToken=${ready.apiToken}&bridgeToken=${config.bridgeToken}#frag`
@@ -140,8 +141,8 @@ const startPythonBridge = async () => {
     env: { ...process.env, STACKPRISM_BRIDGE_NO_OPEN: '1' },
     stdio: ['pipe', 'pipe', 'pipe']
   })
-  const [chunk] = await once(child.stdout, 'data')
-  return { child, ready: JSON.parse(String(chunk).trim()) }
+  const ready = await readFirstStdoutJson(child)
+  return { child, ready }
 }
 
 const startPythonBridgeWithEnv = env =>
@@ -152,8 +153,31 @@ const startPythonBridgeWithEnv = env =>
   })
 
 const readFirstStdoutJson = async child => {
-  const [chunk] = await once(child.stdout, 'data')
-  return JSON.parse(String(chunk).trim())
+  let stdout = ''
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      child.stdout.off('data', onData)
+      child.off('exit', onExit)
+    }
+    const onData = chunk => {
+      stdout += String(chunk)
+      const newline = stdout.indexOf('\n')
+      if (newline < 0) return
+      cleanup()
+      const line = stdout.slice(0, newline)
+      try {
+        resolve(JSON.parse(line))
+      } catch (error) {
+        reject(Object.assign(new Error('PYTHON_BRIDGE_READY_PARSE_FAILED'), { cause: error, stdout }))
+      }
+    }
+    const onExit = code => {
+      cleanup()
+      reject(Object.assign(new Error('PYTHON_BRIDGE_EXITED_BEFORE_READY'), { code, stdout }))
+    }
+    child.stdout.on('data', onData)
+    child.once('exit', onExit)
+  })
 }
 
 const listenOnLoopback = () =>
@@ -374,6 +398,45 @@ test('python fallback uses random port only when unset and reports occupied port
   }
 })
 
+test('python fallback reports non-port startup failures with bridge start code', () => {
+  const parsed = pythonOneShot(`
+import stackprism_bridge
+
+def fail_create_server(_port):
+    raise OSError("cannot bind")
+
+errors = []
+def capture_fail_start(code, message):
+    errors.append({"code": code, "message": message})
+    return 1
+
+stackprism_bridge.create_server = fail_create_server
+stackprism_bridge.fail_start = capture_fail_start
+print(json.dumps({"exit": stackprism_bridge.main(), "error": errors[0]}))
+`)
+  assert.equal(parsed.exit, 1)
+  assert.equal(parsed.error.code, 'BRIDGE_START_FAILED')
+  assert.equal(parsed.error.message, 'Failed to start bridge server.')
+})
+
+test('python fallback sanitizer redacts screenshot download ids', () => {
+  const parsed = pythonOneShot(`
+from stackprism_bridge_lib.protocol import sanitize_bridge_error
+
+sanitized = sanitize_bridge_error({
+    "code": "INVALID_REQUEST",
+    "message": "screenshot shot_${'a'.repeat(43)} failed",
+    "details": {
+        "url": "http://127.0.0.1:17370/v1/captures/cap_1234567890123456789012/screenshot-download/shot_${'b'.repeat(43)}",
+    },
+})
+print(json.dumps(sanitized, sort_keys=True))
+`)
+
+  assert.equal(parsed.message, 'screenshot [redacted-id] failed')
+  assert.equal(JSON.stringify(parsed).includes('shot_'), false)
+})
+
 test('python fallback server factory validates browser open environment before binding', () => {
   const parsed = pythonOneShot(`
 import json as json_module
@@ -439,7 +502,7 @@ test('python fallback creates captures with same basic error envelope', async ()
 
 test('python fallback protocol helpers cover all bridge identifier kinds', () => {
   const parsed = pythonOneShot(`
-from stackprism_bridge_lib.protocol import html_escape_script_json, new_csp_nonce, random_id, redact_url, safe_equal, valid_id
+from stackprism_bridge_lib.protocol import html_escape_script_json, is_known_bridge_error_code, new_csp_nonce, random_id, redact_url, safe_equal, valid_id
 from stackprism_bridge_lib.status import validate_status_update
 values = {
     "apiToken": random_id("spb_", 32),
@@ -454,6 +517,8 @@ print(json.dumps({
     "valid": {kind: valid_id(kind, value) for kind, value in values.items()},
     "unknown": valid_id("unknown", values["apiToken"]),
     "redacted": redact_url("https://example.com/app?token=secret#frag"),
+    "credential_redacted": redact_url("https://user:pass@example.com:8443/app?token=secret#frag"),
+    "render_error_code": is_known_bridge_error_code("BRIDGE_PAGE_RENDER_FAILED"),
     "safe_equal_same": safe_equal("same-token", "same-token"),
     "safe_equal_short": safe_equal("same-token", "same"),
     "safe_equal_long_tail": safe_equal("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaax", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaay"),
@@ -483,6 +548,8 @@ print(json.dumps({
   })
   assert.equal(parsed.unknown, false)
   assert.equal(parsed.redacted, 'https://example.com/app?[redacted]')
+  assert.equal(parsed.credential_redacted, 'https://example.com:8443/app?[redacted]')
+  assert.equal(parsed.render_error_code, true)
   assert.equal(parsed.safe_equal_same, true)
   assert.equal(parsed.safe_equal_short, false)
   assert.equal(parsed.safe_equal_long_tail, false)
@@ -492,6 +559,64 @@ print(json.dumps({
   assert.equal(parsed.escaped.includes('&'), false)
   assert.match(parsed.escaped, /\\u2028/)
   assert.match(parsed.escaped, /\\u2029/)
+})
+
+test('python fallback bridge page renderer validates CSP nonce', () => {
+  const parsed = pythonOneShot(`
+from stackprism_bridge_lib.bridge_page import render_bridge_page_html
+try:
+    render_bridge_page_html('bad" nonce', {"value": "https://example.com/"})
+    result = {"raised": False}
+except ValueError as error:
+    result = {"raised": True, "message": str(error)}
+print(json.dumps(result, sort_keys=True))
+`)
+
+  assert.equal(parsed.raised, true)
+  assert.equal(parsed.message, 'INVALID_CSP_NONCE')
+})
+
+test('python fallback bridge page reports renderer nonce failures over HTTP', () => {
+  const parsed = pythonOneShot(`
+from stackprism_bridge_lib.server_factory import create_server
+import stackprism_bridge_lib.bridge_page as bridge_page
+import stackprism_bridge_lib.protocol as protocol
+import threading
+import urllib.error
+import urllib.request
+
+server, ready = create_server(0, env={"STACKPRISM_BRIDGE_NO_OPEN": "1"})
+thread = threading.Thread(target=server.serve_forever, daemon=True)
+thread.start()
+try:
+    payload = json.dumps(${JSON.stringify(request)}).encode("utf-8")
+    create_request = urllib.request.Request(
+        ready["baseUrl"] + "/v1/captures",
+        data=payload,
+        headers={"Authorization": "Bearer " + ready["apiToken"], "Content-Type": "application/json"},
+        method="POST",
+    )
+    created = json.loads(urllib.request.urlopen(create_request, timeout=5).read().decode("utf-8"))
+    bridge_page.new_csp_nonce = lambda: 'bad" nonce'
+    try:
+        urllib.request.urlopen(created["bridgeUrl"], timeout=5)
+        first = {"status": 200}
+    except urllib.error.HTTPError as error:
+        first = {"status": error.code, "body": json.loads(error.read().decode("utf-8"))}
+    bridge_page.new_csp_nonce = protocol.new_csp_nonce
+    retry = urllib.request.urlopen(created["bridgeUrl"], timeout=5)
+    result = {"first": first, "retry": {"status": retry.status, "content_type": retry.headers.get("content-type"), "body_prefix": retry.read(32).decode("utf-8")}}
+finally:
+    server.shutdown()
+    server.server_close()
+print(json.dumps(result, sort_keys=True))
+`)
+
+  assert.equal(parsed.first.status, 500)
+  assert.equal(parsed.first.body.error.code, 'BRIDGE_PAGE_RENDER_FAILED')
+  assert.equal(parsed.retry.status, 200)
+  assert.match(parsed.retry.content_type, /^text\/html; charset=utf-8\b/)
+  assert.match(parsed.retry.body_prefix, /^<!doctype html>/)
 })
 
 test('python fallback validates documented identifier fixtures', () => {
@@ -537,6 +662,7 @@ checks = {
         {"STACKPRISM_BROWSER_OPEN_COMMAND": "python3", "STACKPRISM_BROWSER_OPEN_ARGS_JSON": json.dumps(["bad\\0arg"])},
     ),
     "invalid_url": open_browser("http://127.0.0.1:1/bridge\\nnext", {"STACKPRISM_BRIDGE_NO_OPEN": "1"}),
+    "invalid_scheme": open_browser("file:///tmp/stackprism.html", {"STACKPRISM_BRIDGE_NO_OPEN": "1"}),
     "missing_command": open_browser("http://127.0.0.1:1/bridge", {"STACKPRISM_BROWSER_OPEN_COMMAND": "/definitely/missing/stackprism-browser"}),
     "invalid_timeout": open_browser("http://127.0.0.1:1/bridge", {"STACKPRISM_BROWSER_OPEN_COMMAND": "python3", "STACKPRISM_BROWSER_OPEN_TIMEOUT_MS": "30001"}),
 }
@@ -547,6 +673,7 @@ print(json.dumps({name: result for name, result in checks.items()}, sort_keys=Tr
   assert.deepEqual(parsed.nul_env, [false, { reason: 'BRIDGE_INVALID_ENV', message: 'Browser open environment contains NUL.' }])
   assert.deepEqual(parsed.nul_json_args, [false, { reason: 'BRIDGE_INVALID_ENV', message: 'Browser open environment contains NUL.' }])
   assert.deepEqual(parsed.invalid_url, [false, { reason: 'invalid_url' }])
+  assert.deepEqual(parsed.invalid_scheme, [false, { reason: 'invalid_scheme', allowed: ['http', 'https'] }])
   assert.deepEqual(parsed.missing_command, [false, { reason: 'command_not_found' }])
   assert.deepEqual(parsed.invalid_timeout, [false, { reason: 'invalid_open_timeout' }])
   assert.deepEqual(parsed.open_timeout, [false, { reason: 'open_timeout' }])
@@ -614,7 +741,7 @@ test('python fallback bridge page has CSP nonce and script-safe config', async (
     assert.match(csp, /default-src 'none'/)
     assert.match(csp, /frame-ancestors 'none'/)
     assert.match(csp, /connect-src 'self'/)
-    assert.match(csp, /img-src data:/)
+    assert.match(csp, /img-src data: blob:/)
     assert.match(csp, /base-uri 'none'/)
     assert.match(csp, /form-action 'none'/)
     assert.ok(cspNonce)
@@ -623,12 +750,15 @@ test('python fallback bridge page has CSP nonce and script-safe config', async (
     assert.match(html, /meta name="stackprism-agent-bridge" content="1"/)
     assert.match(html, /id="bridgeCard" class="bridge-card" data-status="waiting_extension" aria-labelledby="bridge-title" tabindex="-1"/)
     assert.match(html, /id="progressBar"/)
-    assert.match(html, /id="targetUrl" class="target-url" title=""/)
+    assert.match(html, /id="targetUrl" class="target-url" title="" target="_blank" rel="noopener noreferrer" aria-disabled="true"/)
+    assert.match(html, /id="openTargetUrl" class="preview-button target-open-link" target="_blank" rel="noopener noreferrer" aria-disabled="true" tabindex="-1"/)
     assert.match(html, /id="targetScreenshot"/)
     assert.match(html, /id="targetScreenshot" alt=""/)
     assert.match(html, /id="screenshotMeta"/)
     assert.match(html, /id="screenshotDownload"/)
     assert.match(html, /id="copyScreenshot"/)
+    assert.match(html, /id="downloadProfile"/)
+    assert.match(html, /class="preview-button profile-download-button"/)
     assert.match(html, /id="copyAllInfo"/)
     assert.match(html, /id="copyStatus"/)
     assert.match(html, /id="modalCopyStatus"/)
@@ -659,11 +789,18 @@ test('python fallback bridge page has CSP nonce and script-safe config', async (
     assert.match(html, /'image\/png':blob/)
     assert.match(html, /复制截图失败：浏览器未允许写入剪切板，或截图格式无法转换。/)
     assert.match(html, /截图预览无法加载/)
-    assert.match(html, /download=screenshotFilename\(\)/)
+    assert.match(html, /截图预览无法加载，可重新采集或下载 Profile 查看图片链接。/)
+    assert.match(html, /downloadBlob\(await fetchScreenshotBlob\(\),screenshotFilename\(\)\)/)
+    assert.match(html, /currentProfileBlob=null,currentProfileFetchPromise=null/)
+    assert.match(html, /const ensureProfileCached=\(\)=>/)
+    assert.match(html, /downloadBlob\(await ensureProfileCached\(\),profileFilename\(\)\)/)
+    assert.match(html, /if\(status==='completed'\)ensureProfileCached\(\)\.catch\(\(\)=>\{\}\)/)
+    assert.match(html, /\/profile-download/)
+    assert.doesNotMatch(html, /config\.captureId\+'\/profile'/)
     assert.match(html, /button:not\(:disabled\),a\[href\],input:not\(:disabled\),select:not\(:disabled\),textarea:not\(:disabled\),\[tabindex\]:not\(\[tabindex="-1"\]\)/)
     assert.match(html, /currentScreenshot\?\.mimeType==='image\/png'\?'png'/)
     assert.match(html, /currentScreenshot\?\.mimeType==='image\/webp'\?'webp'/)
-    assert.match(html, /el\.targetScreenshot\.src!==currentScreenshot\.dataUrl/)
+    assert.match(html, /currentScreenshotObjectUrl=URL\.createObjectURL\(blob\)/)
     assert.match(html, /el\.targetScreenshot\.alt='目标页面截图预览'/)
     assert.match(html, /el\.targetScreenshot\.alt=''/)
     assert.match(html, /color-scheme:light dark/)
@@ -672,7 +809,18 @@ test('python fallback bridge page has CSP nonce and script-safe config', async (
     assert.match(html, /class="summary-grid"/)
     assert.match(html, /class="screenshot-panel"/)
     assert.match(html, /border-radius:16px/)
-    assert.match(html, /grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/)
+    assert.match(html, /\.summary-grid\{display:grid;grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/)
+    assert.match(html, /grid-template-columns:repeat\(auto-fit,minmax\(min\(100%,300px\),1fr\)\)/)
+    assert.match(html, /\.target-copy\{min-width:0\}/)
+    assert.match(html, /\.target-url\{margin:0;display:-webkit-box;overflow:hidden;overflow-wrap:anywhere;word-break:break-word/)
+    assert.match(html, /\.target-actions\{display:flex;min-width:0;flex-wrap:wrap;gap:10px;justify-content:flex-end\}/)
+    assert.match(html, /\.target-open-link\{min-width:132px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none\}/)
+    assert.match(html, /\.content-card \*\{min-width:0;max-width:100%;overflow-wrap:anywhere;word-break:break-word\}/)
+    assert.match(html, /\.content-card\{min-width:0;min-height:88px;padding:10px;overflow:hidden/)
+    assert.match(html, /\.content-card ul\{display:grid;min-width:0;gap:3px/)
+    assert.match(html, /\.content-card li\{min-width:0;line-height:1\.38;white-space:normal\}/)
+    assert.doesNotMatch(html, /@media \(max-width:980px\)\{[^}]*\.content-grid/)
+    assert.doesNotMatch(html, /@media \(max-width:760px\)\{[^}]*\.content-grid/)
     assert.match(html, /--sp-neutral-line:#e5e9ee/)
     assert.match(html, /grid-template-columns:minmax\(0,1\.22fr\) minmax\(320px,\.82fr\)/)
     assert.match(html, /class="summary-handoff" aria-label="摘要包含"/)
@@ -683,6 +831,14 @@ test('python fallback bridge page has CSP nonce and script-safe config', async (
     assert.match(html, /object-fit:cover/)
     assert.match(html, /object-position:top center/)
     assert.match(html, /-webkit-line-clamp:2/)
+    assert.match(html, /\.target-url\[href\]\{cursor:pointer\}/)
+    assert.match(html, /\.target-url\[href\]:hover\{text-decoration:underline/)
+    assert.match(html, /targetHrefFor=value=>/)
+    assert.match(html, /url\.pathname\.includes\('\[redacted\]'\)/)
+    assert.match(html, /url\.search\.includes\('\[redacted\]'\)/)
+    assert.match(html, /setTargetUrl\(targetText\)/)
+    assert.match(html, /setTargetLink\(el\.openTargetUrl,targetHref\)/)
+    assert.match(html, /node\.removeAttribute\('aria-disabled'\)/)
     assert.match(html, /\.bridge-header\{position:relative;display:block/)
     assert.match(html, /\.summary-handoff\{display:none\}/)
     assert.match(html, /class="target-actions"/)
@@ -696,7 +852,10 @@ test('python fallback bridge page has CSP nonce and script-safe config', async (
     assert.match(html, /setScreenshotState\('截图可用','ready'\)/)
     assert.match(html, /setStepsOpen\(false\)/)
     assert.match(html, /addEventListener\('click',\(\)=>setStepsOpen\(!stepsOpen,true\)\)/)
-    assert.match(html, /\.preview-button:disabled,.modal-close:disabled\{cursor:not-allowed;opacity:1;background:#f7fbfa/)
+    assert.match(
+      html,
+      /\.preview-button:disabled,.modal-close:disabled,.preview-button\[aria-disabled="true"\]\{cursor:not-allowed;opacity:1;background:#f7fbfa/,
+    )
     assert.match(html, /setCopyStatus\(modalOpen\(\)\?el\.modalCopyStatus:el\.copyStatus,value,type\)/)
     assert.match(html, /const restore=el\.screenshotFrame\.disabled\?el\.bridgeCard:el\.screenshotFrame/)
     assert.match(html, /if\(current\|\|failedCurrent\)step\.setAttribute\('aria-current','step'\)/)
@@ -726,7 +885,7 @@ test('python fallback bridge page has CSP nonce and script-safe config', async (
     assert.match(html, /本页只服务当前一次采集/)
     assert.match(html, /摘要不含 token、nonce、raw JSON 或截图 data URL/)
     assert.match(html, /Agent 可读内容/)
-    assert.match(html, /完整 raw profile 仍需 API token 读取/)
+    assert.match(html, /完整 Profile 可在本页完成后下载/)
     assert.match(html, new RegExp(`id="stackprism-agent-bridge-config" type="application/json" nonce="${cspNonce}"`))
     assert.match(html, new RegExp(`<style nonce="${cspNonce}"`))
     assert.match(html, new RegExp(`<script nonce="${cspNonce}"`))
@@ -734,6 +893,7 @@ test('python fallback bridge page has CSP nonce and script-safe config', async (
     assert.match(html, /textContent=value/)
     assert.match(html, /"bridgeToken":"spbt_[A-Za-z0-9_-]{43}"/)
     assert.match(html, /"targetUrl":"https:\/\/93\.184\.216\.34\/app\?\[redacted\]"/)
+    assert.doesNotMatch(html, /"targetHref":/)
 
     const second = await readJson(await fetch(created.body.bridgeUrl))
     assert.equal(second.status, 409)
@@ -1013,7 +1173,11 @@ test('python fallback bridge token can fetch request and post profile', async ()
     assertJsonSecurityHeaders(posted)
     assert.equal(posted.body.status, 'completed')
     assert.equal(posted.body.preview.targetUrl, 'https://93.184.216.34/app?[redacted]')
-    assert.equal(posted.body.preview.screenshot.dataUrl, 'data:image/jpeg;base64,ZmFrZS1qcGVn')
+    assert.equal(posted.body.preview.screenshot.dataUrl, undefined)
+    assert.match(
+      posted.body.preview.screenshot.downloadUrl,
+      new RegExp(`^${ready.baseUrl}/v1/captures/${created.body.id}/screenshot-download/shot_[A-Za-z0-9_-]{43}$`)
+    )
     assert.equal(posted.body.preview.screenshot.scope, 'visible_viewport')
     assert.equal(posted.body.preview.contentSummary.cards[0].title, '复刻建议')
     assert.equal(
@@ -1054,8 +1218,64 @@ test('python fallback bridge token can fetch request and post profile', async ()
     assert.equal(completedStatus.status, 200)
     assert.equal(completedStatus.body.preview.targetUrl, 'https://93.184.216.34/app?[redacted]')
     assert.equal(completedStatus.body.preview.screenshot.mimeType, 'image/jpeg')
+    assert.equal(completedStatus.body.preview.screenshot.downloadUrl, posted.body.preview.screenshot.downloadUrl)
     assert.equal(completedStatus.body.preview.copyText, posted.body.preview.copyText)
     assert.equal(JSON.stringify(completedStatus.body).includes('not for bridge status'), false)
+
+    const downloaded = await readJson(
+      await fetch(`${ready.baseUrl}/v1/captures/${created.body.id}/profile-download`, {
+        headers: { Authorization: `Bearer ${config.bridgeToken}` }
+      })
+    )
+    assert.equal(downloaded.status, 200)
+    assertJsonSecurityHeaders(downloaded, { referrerPolicy: true })
+    assert.equal(downloaded.headers.get('content-disposition'), `attachment; filename="stackprism-${created.body.id}-profile.json"`)
+    assert.equal(downloaded.body.schema, 'stackprism.site_experience_profile.v1')
+    assert.equal(downloaded.body.captureId, created.body.id)
+    assert.equal(downloaded.body.visualProfile.screenshot.dataUrl, undefined)
+    assert.equal(downloaded.body.visualProfile.screenshot.downloadUrl, posted.body.preview.screenshot.downloadUrl)
+    assert.equal(downloaded.body.visualProfile.screenshot.downloadMethod, 'GET')
+    assert.equal(downloaded.body.visualProfile.screenshot.lifecycle.requiresLocalBridge, true)
+    assert.match(downloaded.body.visualProfile.screenshot.lifecycle.availableUntil, /^\d{4}-\d{2}-\d{2}T/)
+    assert.match(downloaded.body.visualProfile.screenshot.lifecycle.note, /before the local bridge process exits/)
+    assert.match(downloaded.body.visualProfile.screenshot.note, /base64 is intentionally omitted/)
+    assert.match(downloaded.body.visualProfile.screenshot.profileJsonNote, /standard JSON and cannot contain comments/)
+    assert.equal(downloaded.body.agentGuidance.recreationPlan.visualReference.screenshotBase64Included, false)
+    assert.equal(downloaded.body.agentGuidance.recreationPlan.visualReference.screenshotIncluded, true)
+    assert.match(
+      downloaded.body.agentGuidance.recreationPlan.visualReference.screenshotProfileJsonNote,
+      /standard JSON and cannot contain comments/
+    )
+    assert.equal(
+      downloaded.body.agentGuidance.recreationPlan.visualReference.screenshotDownloadUrl,
+      posted.body.preview.screenshot.downloadUrl
+    )
+
+    const screenshotDownload = await readBytes(await fetch(downloaded.body.visualProfile.screenshot.downloadUrl))
+    assert.equal(screenshotDownload.status, 200)
+    assert.equal(screenshotDownload.headers.get('content-type'), 'image/jpeg')
+    assert.equal(screenshotDownload.headers.get('content-disposition'), `attachment; filename="stackprism-${created.body.id}-screenshot.jpg"`)
+    assert.equal(screenshotDownload.body.toString('utf8'), 'fake-jpeg')
+
+    const badScreenshotUrl = `${ready.baseUrl}/v1/captures/${created.body.id}/screenshot-download/shot_${'x'.repeat(43)}`
+    const missingScreenshotAuth = await readJson(await fetch(badScreenshotUrl))
+    assert.equal(missingScreenshotAuth.status, 401)
+    assert.equal(missingScreenshotAuth.body.error.code, 'UNAUTHORIZED')
+    const badScreenshotDownload = await readJson(
+      await fetch(badScreenshotUrl, {
+        headers: { Authorization: `Bearer ${config.bridgeToken}` }
+      })
+    )
+    assert.equal(badScreenshotDownload.status, 403)
+    assert.equal(badScreenshotDownload.body.error.code, 'FORBIDDEN')
+
+    const downloadReadyStatus = await readJson(
+      await fetch(`${ready.baseUrl}/v1/captures/${created.body.id}`, {
+        headers: { Authorization: `Bearer ${ready.apiToken}` }
+      })
+    )
+    assert.equal(downloadReadyStatus.status, 200)
+    assert.equal(downloadReadyStatus.body.profileDownloadReady, true)
 
     const forbidden = await readJson(
       await fetch(`${ready.baseUrl}/v1/captures/${created.body.id}/profile`, {
@@ -1074,6 +1294,7 @@ test('python fallback bridge token can fetch request and post profile', async ()
     assert.equal(fetched.status, 200)
     assertJsonSecurityHeaders(fetched, { referrerPolicy: true })
     assert.equal(fetched.body.schema, 'stackprism.site_experience_profile.v1')
+    assert.equal(fetched.body.visualProfile.screenshot.dataUrl, undefined)
   } finally {
     child.kill('SIGTERM')
     await once(child, 'exit')
@@ -1111,6 +1332,133 @@ test('python fallback status preview derives screenshot mime type from the data 
     child.kill('SIGTERM')
     await once(child, 'exit')
   }
+})
+
+test('python fallback profile reads and public screenshot downloads refresh result TTL', () => {
+  const parsed = pythonOneShot(`
+from stackprism_bridge_lib.server_factory import create_server
+import base64
+import json
+import re
+import threading
+import urllib.error
+import urllib.request
+from html import unescape
+
+clock = {"now": 1000.0}
+
+def now():
+    return clock["now"]
+
+def request(method, url, token=None, body=None):
+    headers = {}
+    data = None
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+        data = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=3) as response:
+            body_bytes = response.read()
+            content_type = response.headers.get("content-type", "")
+            parsed = json.loads(body_bytes.decode("utf-8")) if content_type.startswith("application/json") else None
+            return {"status": response.status, "body": parsed, "text": body_bytes.decode("utf-8", "replace"), "content_type": content_type}
+    except urllib.error.HTTPError as error:
+        body_bytes = error.read()
+        try:
+            parsed = json.loads(body_bytes.decode("utf-8"))
+        except json.JSONDecodeError:
+            parsed = None
+        return {"status": error.code, "body": parsed, "text": body_bytes.decode("utf-8", "replace"), "content_type": error.headers.get("content-type", "")}
+
+def bridge_config(html):
+    match = re.search(r'<script id="stackprism-agent-bridge-config" type="application/json" nonce="[^"]+">([^<]+)</script>', html)
+    return json.loads(unescape(match.group(1)))
+
+def status_body(created, config, body):
+    return {
+        "captureId": created["id"],
+        "sessionId": config["sessionId"],
+        "nonce": config["nonce"],
+        "protocolVersion": 1,
+        **body,
+    }
+
+server, ready = create_server(0, now=now, result_ttl_seconds=0.1)
+thread = threading.Thread(target=server.serve_forever, daemon=True)
+thread.start()
+try:
+    created = request("POST", f"{ready['baseUrl']}/v1/captures", ready["apiToken"], ${JSON.stringify(request)})["body"]
+    config = bridge_config(request("GET", created["bridgeUrl"])["text"])
+    request("GET", f"{ready['baseUrl']}/v1/captures/{created['id']}/request", config["bridgeToken"])
+    request(
+        "POST",
+        f"{ready['baseUrl']}/v1/captures/{created['id']}/status",
+        config["bridgeToken"],
+        status_body(created, config, {"status": "running", "phase": "target_loaded", "sequence": 1, "finalUrl": ${JSON.stringify(request.url)}, "targetNetworkAddress": "93.184.216.34"}),
+    )
+    profile = ${JSON.stringify(profileFor('__CAPTURE_ID__'))}
+    profile["captureId"] = created["id"]
+    profile["visualProfile"] = {
+        "screenshot": {
+            "dataUrl": "data:image/png;base64," + base64.b64encode(b"fake-png").decode("ascii"),
+            "mimeType": "image/png",
+            "byteLength": 8,
+            "scope": "visible_viewport",
+        }
+    }
+    profile["agentGuidance"] = {"recreationPlan": {"visualReference": {}}}
+    request("POST", f"{ready['baseUrl']}/v1/captures/{created['id']}/profile", config["bridgeToken"], profile)
+    capture = server.store.get(created["id"])
+    stored_data_url_present = "dataUrl" in capture["profile"]["visualProfile"]["screenshot"]
+    stored_screenshot_body = capture["screenshotAsset"]["data"].decode("utf-8")
+    first_expiry = capture["resultExpiresAt"]
+    clock["now"] = first_expiry - 0.001
+    profile_read = request("GET", f"{ready['baseUrl']}/v1/captures/{created['id']}/profile", ready["apiToken"])
+    refreshed_expiry = capture["resultExpiresAt"]
+    clock["now"] = first_expiry + 0.001
+    screenshot_read = request("GET", profile_read["body"]["visualProfile"]["screenshot"]["downloadUrl"])
+    after_screenshot_expiry = capture["resultExpiresAt"]
+    clock["now"] = after_screenshot_expiry + 0.001
+    expired_screenshot = request("GET", profile_read["body"]["visualProfile"]["screenshot"]["downloadUrl"])
+    screenshot = profile_read["body"]["visualProfile"]["screenshot"]
+    visual_reference = profile_read["body"]["agentGuidance"]["recreationPlan"]["visualReference"]
+    print(json.dumps({
+        "profileStatus": profile_read["status"],
+        "dataUrlPresent": "dataUrl" in profile_read["body"]["visualProfile"]["screenshot"],
+        "storedDataUrlPresent": stored_data_url_present,
+        "storedScreenshotBody": stored_screenshot_body,
+        "refreshed": refreshed_expiry > first_expiry,
+        "screenshotStatus": screenshot_read["status"],
+        "screenshotType": screenshot_read["content_type"],
+        "screenshotBody": screenshot_read["text"],
+        "afterScreenshotExpiry": after_screenshot_expiry,
+        "refreshedExpiry": refreshed_expiry,
+        "availableUntil": screenshot["lifecycle"]["availableUntil"],
+        "visualReferenceAvailableUntil": visual_reference["screenshotAvailableUntil"],
+        "expiredStatus": expired_screenshot["status"],
+        "expiredCode": expired_screenshot["body"]["error"]["code"],
+    }, sort_keys=True))
+finally:
+    server.shutdown()
+    server.server_close()
+`)
+
+  assert.equal(parsed.profileStatus, 200)
+  assert.equal(parsed.dataUrlPresent, false)
+  assert.equal(parsed.storedDataUrlPresent, false)
+  assert.equal(parsed.storedScreenshotBody, 'fake-png')
+  assert.equal(parsed.refreshed, true)
+  assert.equal(parsed.screenshotStatus, 200)
+  assert.equal(parsed.screenshotType, 'image/png')
+  assert.equal(parsed.screenshotBody, 'fake-png')
+  assert.ok(parsed.afterScreenshotExpiry > parsed.refreshedExpiry)
+  assert.match(parsed.availableUntil, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
+  assert.equal(parsed.availableUntil, parsed.visualReferenceAvailableUntil)
+  assert.equal(parsed.expiredStatus, 410)
+  assert.equal(parsed.expiredCode, 'CAPTURE_RESULT_EXPIRED')
 })
 
 test('python fallback rejects repeated and oversized profile submissions', async () => {
@@ -1400,6 +1748,11 @@ try:
         f"{ready['baseUrl']}/v1/captures/{created['id']}/profile",
         ready["apiToken"],
     )
+    expired_download_status, expired_download_body, _expired_download_text = request_json(
+        "GET",
+        f"{ready['baseUrl']}/v1/captures/{created['id']}/profile-download",
+        config["bridgeToken"],
+    )
     expired_page_status, _expired_page_body, expired_page_text = request_json("GET", created["bridgeUrl"])
     print(json.dumps({
         "request_status": request_status,
@@ -1408,6 +1761,8 @@ try:
         "posted_capture_status": posted_body.get("status"),
         "expired_profile_status": expired_profile_status,
         "expired_profile_code": expired_profile_body["error"]["code"],
+        "expired_download_status": expired_download_status,
+        "expired_download_code": expired_download_body["error"]["code"],
         "expired_page_status": expired_page_status,
         "expired_page_has_code": "CAPTURE_RESULT_EXPIRED" in expired_page_text,
         "expired_page_has_token": bool(re.search(r"spbt_[A-Za-z0-9_-]{43}", expired_page_text)),
@@ -1422,6 +1777,8 @@ finally:
   assert.equal(parsed.posted_capture_status, 'completed')
   assert.equal(parsed.expired_profile_status, 410)
   assert.equal(parsed.expired_profile_code, 'CAPTURE_RESULT_EXPIRED')
+  assert.equal(parsed.expired_download_status, 410)
+  assert.equal(parsed.expired_download_code, 'CAPTURE_RESULT_EXPIRED')
   assert.equal(parsed.expired_page_status, 410)
   assert.equal(parsed.expired_page_has_code, true)
   assert.equal(parsed.expired_page_has_token, false)
@@ -1566,6 +1923,33 @@ test('python fallback restricts bridge-token terminal status updates', async () 
     )
     assert.equal(failedWithoutError.status, 400)
     assert.equal(failedWithoutError.body.error.code, 'INVALID_REQUEST')
+
+    const failedWithNullError = await readJson(
+      await fetch(statusUrl, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${config.bridgeToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(statusBody(created.body.id, config, { status: 'failed', phase: 'cleanup', sequence: 1, error: null }))
+      })
+    )
+    assert.equal(failedWithNullError.status, 400)
+    assert.equal(failedWithNullError.body.error.code, 'INVALID_REQUEST')
+
+    const boolSequence = await readJson(
+      await fetch(statusUrl, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${config.bridgeToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(
+          statusBody(created.body.id, config, {
+            status: 'failed',
+            phase: 'cleanup',
+            sequence: true,
+            error: { code: 'TARGET_TAB_CLOSED', message: 'Target closed.' }
+          })
+        )
+      })
+    )
+    assert.equal(boolSequence.status, 409)
+    assert.equal(boolSequence.body.error.code, 'STALE_STATUS_UPDATE')
 
     const failedUnknownCode = await readJson(
       await fetch(statusUrl, {
@@ -2192,6 +2576,57 @@ print(json.dumps({
   assert.deepEqual(parsed.failed, { status: 413, code: 'REQUEST_TOO_LARGE', message: 'Request body is too large.' })
   assert.equal(parsed.readCalls, 0)
   assert.equal(parsed.closeConnection, true)
+})
+
+test('python fallback body reader closes connection when request body cannot be consumed', () => {
+  const parsed = pythonOneShot(`
+from stackprism_bridge_lib.body import read_json_body
+
+class Headers:
+    def __init__(self, values):
+        self.values = values
+    def get(self, name, default=None):
+        return self.values.get(name, default)
+
+class Body:
+    def __init__(self, chunks=None):
+        self.chunks = list(chunks or [])
+    def read(self, _size):
+        return self.chunks.pop(0) if self.chunks else b""
+
+class Handler:
+    def __init__(self, headers, body=None):
+        self.headers = Headers(headers)
+        self.rfile = body or Body()
+        self.failed = None
+        self.close_connection = False
+    def fail(self, status, code, message):
+        self.failed = {"status": status, "code": code, "message": message}
+
+unsupported = Handler({"Content-Type": "text/plain", "Content-Length": "2"}, Body([b"{}"]))
+invalid_length = Handler({"Content-Type": "application/json", "Content-Length": "nope"}, Body([b"{}"]))
+short_body = Handler({"Content-Type": "application/json", "Content-Length": "4"}, Body([b"{}"]))
+invalid_json = Handler({"Content-Type": "application/json", "Content-Length": "1"}, Body([b"{"]))
+
+for handler in (unsupported, invalid_length, short_body, invalid_json):
+    read_json_body(handler, 1024, "REQUEST_TOO_LARGE")
+
+print(json.dumps({
+    "unsupported": unsupported.close_connection,
+    "invalidLength": invalid_length.close_connection,
+    "shortBody": short_body.close_connection,
+    "invalidJson": invalid_json.close_connection,
+    "unsupportedStatus": unsupported.failed["status"],
+    "invalidLengthStatus": invalid_length.failed["status"],
+}, sort_keys=True))
+`)
+
+  assert.equal(parsed.unsupported, true)
+  assert.equal(parsed.invalidLength, true)
+  assert.equal(parsed.shortBody, true)
+  assert.equal(parsed.invalidJson, true)
+  assert.equal(parsed.unsupportedStatus, 415)
+  assert.equal(parsed.invalidLengthStatus, 400)
 })
 
 test('python fallback rejects private, self-target, and cross-origin capture requests', async () => {

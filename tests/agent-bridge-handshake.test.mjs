@@ -180,25 +180,28 @@ test('bridge page parser validates loopback URL and JSON config token', async ()
   )
 
   const originalFetch = globalThis.fetch
-  globalThis.fetch = async () => ({
-    ok: false,
-    status: 502,
-    json: async () => {
-      throw new SyntaxError('Unexpected token < in JSON')
-    },
-    text: async () => '<html>token=secret&nonce=n_EEEEEEEEEEEEEEEEEEEEEE</html>'
-  })
-  await assert.rejects(
-    () => requestJson(context, '/v1/captures/cap_CCCCCCCCCCCCCCCCCCCCCC/request'),
-    error => {
-      assert.equal(error.message, 'PROFILE_TRANSPORT_FAILED')
-      assert.equal(error.bridgeError.code, 'PROFILE_TRANSPORT_FAILED')
-      assert.equal(error.bridgeError.details.status, 502)
-      assert.equal(JSON.stringify(error.bridgeError), JSON.stringify(error.bridgeError).replace(/secret|nonce=/g, ''))
-      return true
-    }
-  )
-  globalThis.fetch = originalFetch
+  try {
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 502,
+      json: async () => {
+        throw new SyntaxError('Unexpected token < in JSON')
+      },
+      text: async () => '<html>token=secret&nonce=n_EEEEEEEEEEEEEEEEEEEEEE</html>'
+    })
+    await assert.rejects(
+      () => requestJson(context, '/v1/captures/cap_CCCCCCCCCCCCCCCCCCCCCC/request'),
+      error => {
+        assert.equal(error.message, 'PROFILE_TRANSPORT_FAILED')
+        assert.equal(error.bridgeError.code, 'PROFILE_TRANSPORT_FAILED')
+        assert.equal(error.bridgeError.details.status, 502)
+        assert.equal(JSON.stringify(error.bridgeError), JSON.stringify(error.bridgeError).replace(/secret|nonce=/g, ''))
+        return true
+      }
+    )
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })
 
 test('bridge client posts request mismatch and never starts capture when request envelope is bound to another capture', async () => {
@@ -803,6 +806,19 @@ test('profile transfer rejects invalid begin metadata before buffering chunks', 
   assert.equal(invalidHash.ok, false)
   assert.equal(invalidHash.error.code, 'PROFILE_TRANSPORT_FAILED')
 
+  const emptyTransfer = await handleTransferMessage(context, postStatus, requestJson, {
+    type: 'AGENT_PROFILE_TRANSFER_BEGIN',
+    captureId,
+    sessionId,
+    nonce,
+    profileTransferId: 'xfer_FFFFFFFFFFFFFFFFFFFFFF',
+    chunkCount: 1,
+    byteLength: 0,
+    sha256: sha256Hex(Buffer.alloc(0))
+  })
+  assert.equal(emptyTransfer.ok, false)
+  assert.equal(emptyTransfer.error.code, 'PROFILE_TRANSPORT_FAILED')
+
   const mismatchedChunkCount = await handleTransferMessage(context, postStatus, requestJson, {
     type: 'AGENT_PROFILE_TRANSFER_BEGIN',
     captureId,
@@ -1119,23 +1135,26 @@ test('background hello rejects forged or mismatched bridge senders', async () =>
   )
   const env = makeSessionChrome()
   globalThis.chrome = env.chrome
-  const message = { captureId, sessionId, nonce }
+  try {
+    const message = { captureId, sessionId, nonce }
 
-  assert.equal(extractBridgeSenderSession(message, sender()).ok, true)
-  assert.equal(extractBridgeSenderSession(message, sender('https://example.com/bridge')).error.code, 'INVALID_REQUEST')
-  assert.equal(extractBridgeSenderSession(message, senderWithoutTabId()).error.code, 'INVALID_REQUEST')
-  assert.equal(
-    extractBridgeSenderSession({ captureId, sessionId, nonce: identifiers.nonce.valid[1] }, sender()).error.code,
-    'INVALID_REQUEST'
-  )
+    assert.equal(extractBridgeSenderSession(message, sender()).ok, true)
+    assert.equal(extractBridgeSenderSession(message, sender('https://example.com/bridge')).error.code, 'INVALID_REQUEST')
+    assert.equal(extractBridgeSenderSession(message, senderWithoutTabId()).error.code, 'INVALID_REQUEST')
+    assert.equal(
+      extractBridgeSenderSession({ captureId, sessionId, nonce: identifiers.nonce.valid[1] }, sender()).error.code,
+      'INVALID_REQUEST'
+    )
 
-  await clearBridgeSession(7)
-  assert.equal((await registerBridgeSession(extractBridgeSenderSession(message, sender()).session)).ok, true)
-  assert.equal((await registerBridgeSession(extractBridgeSenderSession(message, sender()).session)).ok, true)
-  const mismatch = extractBridgeSenderSession(message, sender(bridgeUrl.replace('17370', '17371')))
-  assert.equal((await registerBridgeSession(mismatch.session)).error.code, 'INVALID_REQUEST')
-  await clearBridgeSession(7)
-  delete globalThis.chrome
+    await clearBridgeSession(7)
+    assert.equal((await registerBridgeSession(extractBridgeSenderSession(message, sender()).session)).ok, true)
+    assert.equal((await registerBridgeSession(extractBridgeSenderSession(message, sender()).session)).ok, true)
+    const mismatch = extractBridgeSenderSession(message, sender(bridgeUrl.replace('17370', '17371')))
+    assert.equal((await registerBridgeSession(mismatch.session)).error.code, 'INVALID_REQUEST')
+    await clearBridgeSession(7)
+  } finally {
+    delete globalThis.chrome
+  }
 })
 
 test('registered bridge messages must keep matching sender tab and URL', async () => {

@@ -5,9 +5,11 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import net from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { test } from 'node:test'
 import vm from 'node:vm'
-import { bridgePageScript } from '../agent-skill/stackprism-site-experience/scripts/bridge/bridge-page-assets.mjs'
+import { bridgePageScript, bridgePageStyle } from '../agent-skill/stackprism-site-experience/scripts/bridge/bridge-page-assets.mjs'
+import { renderBridgePageHtml } from '../agent-skill/stackprism-site-experience/scripts/bridge/bridge-page.mjs'
 import { CaptureStore } from '../agent-skill/stackprism-site-experience/scripts/bridge/capture-store.mjs'
 import { createBridgeServer } from '../agent-skill/stackprism-site-experience/scripts/bridge/http-server.mjs'
 import {
@@ -41,6 +43,7 @@ const baseCaptureRequest = {
 const auth = token => ({ Authorization: `Bearer ${token}` })
 
 const readJson = async response => ({ status: response.status, body: await response.json(), headers: response.headers })
+const readBytes = async response => ({ status: response.status, body: Buffer.from(await response.arrayBuffer()), headers: response.headers })
 
 const createClassList = () => {
   const values = new Set()
@@ -113,6 +116,7 @@ const createBridgeScriptHarness = async (options = {}) => {
     'progressBar',
     'bridgeCard',
     'targetUrl',
+    'openTargetUrl',
     'targetHelper',
     'screenshotFrame',
     'targetScreenshot',
@@ -120,6 +124,7 @@ const createBridgeScriptHarness = async (options = {}) => {
     'screenshotDownload',
     'copyScreenshot',
     'copyAllInfo',
+    'downloadProfile',
     'copyStatus',
     'modalCopyStatus',
     'stepSummary',
@@ -197,6 +202,17 @@ const createBridgeScriptHarness = async (options = {}) => {
   })
   const writtenItems = []
   const writtenText = []
+  const objectUrls = []
+  class TestUrl extends URL {
+    static createObjectURL(blob) {
+      objectUrls.push(blob)
+      return `blob:stackprism-${objectUrls.length}`
+    }
+
+    static revokeObjectURL(value) {
+      context.revokedObjectUrl = value
+    }
+  }
   const context = vm.createContext({
     Blob,
     ClipboardItem: class ClipboardItem {
@@ -204,7 +220,7 @@ const createBridgeScriptHarness = async (options = {}) => {
         this.items = items
       }
     },
-    URL,
+    URL: TestUrl,
     atob: value => Buffer.from(value, 'base64').toString('binary'),
     console,
     createImageBitmap: async blob => {
@@ -214,24 +230,38 @@ const createBridgeScriptHarness = async (options = {}) => {
     document,
     fetch:
       options.fetch ||
-      (async () => ({
-        ok: true,
-        json: async () => ({
-          status: 'completed',
-          phase: 'cleanup',
-          preview: {
-            contentSummary: { cards: [{ title: '视觉', items: ['清晰的双列布局'] }] },
-            copyText: 'StackPrism profile summary',
-            screenshot: {
-              byteLength: 12,
-              dataUrl: `data:image/webp;base64,${Buffer.from('webp').toString('base64')}`,
-              mimeType: 'image/webp',
-              scope: 'viewport'
-            },
-            targetUrl: 'https://example.test/page'
+      (async url => {
+        if (String(url).includes('/profile-download')) {
+          return {
+            ok: true,
+            blob: async () => new Blob(['{"schema":"stackprism.site_experience_profile.v1"}\n'], { type: 'application/json' })
           }
-        })
-      })),
+        }
+        if (String(url).includes('/screenshot-download/')) {
+          return {
+            ok: true,
+            blob: async () => new Blob(['webp'], { type: 'image/webp' })
+          }
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            status: 'completed',
+            phase: 'cleanup',
+            preview: {
+              contentSummary: { cards: [{ title: '视觉', items: ['清晰的双列布局'] }] },
+              copyText: 'StackPrism profile summary',
+              screenshot: {
+                byteLength: 12,
+                downloadUrl: '/v1/captures/cap_test/screenshot-download/shot_test',
+                mimeType: 'image/webp',
+                scope: 'viewport'
+              },
+              targetUrl: 'https://example.test/page'
+            }
+          })
+        }
+      }),
     navigator: {
       clipboard: {
         write: async items => writtenItems.push(...items),
@@ -245,7 +275,7 @@ const createBridgeScriptHarness = async (options = {}) => {
   for (let attempt = 0; attempt < 5 && !isReady(elements.bridgeCard.dataset.status); attempt += 1) {
     await new Promise(resolve => setImmediate(resolve))
   }
-  return { context, document, elements, steps, writtenItems, writtenText }
+  return { context, document, elements, steps, writtenItems, writtenText, objectUrls }
 }
 
 const sensitiveFailedError = (ready, created, config) => {
@@ -351,16 +381,22 @@ test('settings and help pages document mobile and agent bridge UI boundaries', (
   assert.match(help, /@media \(max-width: 760px\)[\s\S]*\.help-header[\s\S]*position: static/)
 })
 
-test('bridge page script supports screenshot actions and modal focus loop', async () => {
-  const { context, document, elements, steps, writtenItems, writtenText } = await createBridgeScriptHarness()
+test('bridge page script supports profile download, screenshot actions and modal focus loop', async () => {
+  const { context, document, elements, steps, writtenItems, writtenText, objectUrls } = await createBridgeScriptHarness()
 
   assert.equal(elements.bridgeCard.dataset.status, 'completed')
   assert.equal(elements.targetUrl.textContent, 'https://example.test/page')
   assert.equal(elements.targetUrl.title, 'https://example.test/page')
+  assert.equal(elements.targetUrl.href, 'https://example.test/page')
+  assert.equal(elements.targetUrl['aria-disabled'], undefined)
+  assert.equal(elements.openTargetUrl.href, 'https://example.test/page')
+  assert.equal(elements.openTargetUrl['aria-disabled'], undefined)
+  assert.equal(elements.openTargetUrl.tabindex, undefined)
   assert.equal(elements.targetHelper.textContent, '已生成 Agent 可读摘要，可复制给本机 Coding Agent 使用。')
   assert.equal(elements.screenshotDownload.disabled, false)
   assert.equal(elements.copyScreenshot.disabled, false)
   assert.equal(elements.copyAllInfo.disabled, false)
+  assert.equal(elements.downloadProfile.disabled, false)
   assert.equal(elements.screenshotTileValue.textContent, '截图可用')
   assert.equal(elements.screenshotStateBadge.textContent, '截图可用')
   assert.equal(elements.screenshotStateBadge.dataset.state, 'ready')
@@ -384,10 +420,21 @@ test('bridge page script supports screenshot actions and modal focus loop', asyn
   assert.equal(elements.copyStatus.textContent, '已复制全部信息。')
   assert.equal(elements.copyAllInfo.textContent, '已复制')
 
-  elements.screenshotDownload.click()
+  await elements.downloadProfile.click()
+  const profileLink = document.body.children.at(-1)
+  assert.equal(profileLink.tagName, 'a')
+  assert.equal(profileLink.href, 'blob:stackprism-2')
+  assert.equal(profileLink.download, 'stackprism-cap_test-profile.json')
+  assert.equal(profileLink.removed, true)
+  assert.equal(objectUrls.length, 2)
+  assert.equal(elements.copyStatus.textContent, '已下载 Profile JSON。')
+
+  await elements.screenshotDownload.click()
   const downloadLink = document.body.children.at(-1)
   assert.equal(downloadLink.tagName, 'a')
-  assert.equal(downloadLink.href, elements.targetScreenshot.src)
+  assert.equal(downloadLink.href.startsWith('blob:stackprism-'), true)
+  assert.notEqual(downloadLink.href, elements.targetScreenshot.src)
+  assert.equal(objectUrls.at(-1).type, 'image/webp')
   assert.equal(downloadLink.download, 'stackprism-cap_test-screenshot.webp')
   assert.equal(downloadLink.removed, true)
 
@@ -437,6 +484,104 @@ test('bridge page script supports screenshot actions and modal focus loop', asyn
   assert.equal(document.activeElement, elements.bridgeCard)
 })
 
+test('bridge page script downloads cached profile after bridge closes', async () => {
+  const profileBlob = new Blob(['{"schema":"stackprism.site_experience_profile.v1","cached":true}\n'], { type: 'application/json' })
+  let statusReads = 0
+  let profileReads = 0
+  const { document, elements, objectUrls } = await createBridgeScriptHarness({
+    fetch: async url => {
+      if (String(url).includes('/profile-download')) {
+        profileReads += 1
+        return { ok: true, blob: async () => profileBlob }
+      }
+      statusReads += 1
+      return {
+        ok: true,
+        json: async () => ({
+          status: 'completed',
+          phase: 'cleanup',
+          preview: {
+            contentSummary: { cards: [] },
+            copyText: 'StackPrism profile summary',
+            targetUrl: 'https://example.test/page'
+          }
+        })
+      }
+    }
+  })
+
+  for (let attempt = 0; attempt < 5 && profileReads === 0; attempt += 1) {
+    await new Promise(resolve => setImmediate(resolve))
+  }
+  assert.equal(statusReads, 1)
+  assert.equal(profileReads, 1)
+  assert.equal(elements.downloadProfile.disabled, false)
+
+  await elements.downloadProfile.click()
+
+  assert.equal(profileReads, 1)
+  assert.equal(objectUrls[0], profileBlob)
+  const profileLink = document.body.children.at(-1)
+  assert.equal(profileLink.href, 'blob:stackprism-1')
+  assert.equal(profileLink.download, 'stackprism-cap_test-profile.json')
+  assert.equal(elements.copyStatus.textContent, '已下载 Profile JSON。')
+})
+
+test('bridge page script invalidates screenshot controls when image download fails', async () => {
+  let screenshotReads = 0
+  const { elements } = await createBridgeScriptHarness({
+    fetch: async url => {
+      if (String(url).includes('/profile-download')) {
+        return {
+          ok: true,
+          blob: async () => new Blob(['{"schema":"stackprism.site_experience_profile.v1"}\n'], { type: 'application/json' })
+        }
+      }
+      if (String(url).includes('/screenshot-download/')) {
+        screenshotReads += 1
+        return { ok: false, status: 500, blob: async () => new Blob(['server error'], { type: 'text/plain' }) }
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          status: 'completed',
+          phase: 'cleanup',
+          preview: {
+            contentSummary: { cards: [] },
+            copyText: 'StackPrism profile summary',
+            screenshot: {
+              byteLength: 12,
+              downloadUrl: '/v1/captures/cap_test/screenshot-download/shot_test',
+              mimeType: 'image/jpeg',
+              scope: 'viewport'
+            },
+            targetUrl: 'https://example.test/page'
+          }
+        })
+      }
+    }
+  })
+
+  for (let attempt = 0; attempt < 5 && elements.screenshotStateBadge.dataset.state !== 'failed'; attempt += 1) {
+    await new Promise(resolve => setImmediate(resolve))
+  }
+
+  assert.equal(screenshotReads, 1)
+  assert.equal(elements.screenshotStateBadge.dataset.state, 'failed')
+  assert.equal(elements.screenshotTileValue.textContent, '截图失败')
+  assert.equal(elements.screenshotFrame.disabled, true)
+  assert.equal(elements.screenshotDownload.disabled, true)
+  assert.equal(elements.copyScreenshot.disabled, true)
+  assert.equal(elements.modalDownload.disabled, true)
+  assert.equal(elements.modalCopyScreenshot.disabled, true)
+  assert.equal(elements.targetScreenshot.alt, '')
+  assert.equal(elements.modalScreenshot.alt, '')
+  assert.equal(elements.screenshotMeta.textContent, '截图预览无法加载')
+  assert.equal(elements.screenshotEmpty.textContent, '截图预览无法加载')
+  assert.equal(elements.copyStatus.dataset.state, 'error')
+  assert.equal(elements.copyStatus.textContent, '截图预览无法加载，可重新采集或下载 Profile 查看图片链接。')
+})
+
 test('bridge page script keeps terminal failure visible after bridge disconnect', async () => {
   const responses = [
     {
@@ -463,8 +608,77 @@ test('bridge page script keeps terminal failure visible after bridge disconnect'
   assert.equal(elements.bridgeCard.dataset.phase, 'target_loaded')
   assert.equal(elements.stateLabel.textContent, '采集失败')
   assert.equal(elements.status.textContent, 'PRIVATE_NETWORK_TARGET_BLOCKED')
+  assert.equal(elements.targetUrl.href, 'https://linear.app/')
+  assert.equal(elements.targetUrl['aria-disabled'], undefined)
+  assert.equal(elements.openTargetUrl.href, 'https://linear.app/')
+  assert.equal(elements.openTargetUrl['aria-disabled'], undefined)
   assert.equal(elements.stepSummary.textContent, '结果：采集失败 - 目标页面已加载')
   assert.equal(steps[3].classList.contains('failed'), true)
+})
+
+test('bridge page script links redacted query target URLs without query parameters', async () => {
+  const { elements } = await createBridgeScriptHarness({
+    fetch: async () => ({
+      ok: true,
+      json: async () => ({
+        status: 'failed',
+        phase: 'target_loaded',
+        preview: { targetUrl: 'https://example.test/app?[redacted]' }
+      })
+    }),
+    isReady: status => status === 'failed'
+  })
+
+  assert.equal(elements.targetUrl.textContent, 'https://example.test/app?[redacted]')
+  assert.equal(elements.targetUrl.title, 'https://example.test/app?[redacted]')
+  assert.equal(elements.targetUrl.href, 'https://example.test/app')
+  assert.equal(elements.targetUrl['aria-disabled'], undefined)
+  assert.equal(elements.openTargetUrl.href, 'https://example.test/app')
+  assert.equal(elements.openTargetUrl['aria-disabled'], undefined)
+})
+
+test('bridge page script links ordinary long project slug target URLs', async () => {
+  const longProjectUrl = 'https://vercel.com/dashboard/projects/very-long-project-name-with-token-like-segment-and-many-words'
+  const { elements } = await createBridgeScriptHarness({
+    fetch: async () => ({
+      ok: true,
+      json: async () => ({
+        status: 'failed',
+        phase: 'target_loaded',
+        preview: { targetUrl: longProjectUrl }
+      })
+    }),
+    isReady: status => status === 'failed'
+  })
+
+  assert.equal(elements.targetUrl.textContent, longProjectUrl)
+  assert.equal(elements.targetUrl.title, longProjectUrl)
+  assert.equal(elements.targetUrl.href, longProjectUrl)
+  assert.equal(elements.targetUrl['aria-disabled'], undefined)
+  assert.equal(elements.openTargetUrl.href, longProjectUrl)
+  assert.equal(elements.openTargetUrl['aria-disabled'], undefined)
+})
+
+test('bridge page script does not link redacted target URL paths', async () => {
+  const { elements } = await createBridgeScriptHarness({
+    fetch: async () => ({
+      ok: true,
+      json: async () => ({
+        status: 'failed',
+        phase: 'target_loaded',
+        preview: { targetUrl: 'https://example.test/[redacted]/app' }
+      })
+    }),
+    isReady: status => status === 'failed'
+  })
+
+  assert.equal(elements.targetUrl.textContent, 'https://example.test/[redacted]/app')
+  assert.equal(elements.targetUrl.title, 'https://example.test/[redacted]/app')
+  assert.equal(elements.targetUrl.href, undefined)
+  assert.equal(elements.targetUrl['aria-disabled'], 'true')
+  assert.equal(elements.openTargetUrl.href, undefined)
+  assert.equal(elements.openTargetUrl['aria-disabled'], 'true')
+  assert.equal(elements.openTargetUrl.tabindex, '-1')
 })
 
 const percentEncodeFirstPayloadChar = value =>
@@ -537,6 +751,23 @@ test('js bridge protocol helpers use strict token comparison and script-safe JSO
   assert.equal(escaped.includes('&'), false)
   assert.match(escaped, /\\u2028/)
   assert.match(escaped, /\\u2029/)
+})
+
+test('js bridge page renderer validates nonce and script-escapes object config', () => {
+  assert.throws(
+    () => renderBridgePageHtml('bad" nonce', { value: 'https://example.com/' }),
+    /INVALID_CSP_NONCE/
+  )
+
+  const html = renderBridgePageHtml('abcdefghijklmnopqrstuv', {
+    value: '</script><script>alert(1)</script>&\u2028\u2029'
+  })
+  const configText = html.match(/<script id="stackprism-agent-bridge-config" type="application\/json" nonce="[^"]+">([^<]+)/)[1]
+
+  assert.equal(configText.includes('</script>'), false)
+  assert.equal(configText.includes('<script>'), false)
+  assert.equal(configText.includes('&'), false)
+  assert.equal(JSON.parse(configText).value, '</script><script>alert(1)</script>&\u2028\u2029')
 })
 
 test('js bridge protocol helper validates documented identifier fixtures', () => {
@@ -645,7 +876,7 @@ test('bridge page renders bridge token once with hardened headers', async () => 
     assert.equal(csp.includes('unsafe-inline'), false)
     assert.match(csp, /default-src 'none'/)
     assert.match(csp, /connect-src 'self'/)
-    assert.match(csp, /img-src data:/)
+    assert.match(csp, /img-src data: blob:/)
     assert.match(csp, /frame-ancestors 'none'/)
     assert.match(csp, /base-uri 'none'/)
     assert.match(csp, /form-action 'none'/)
@@ -655,12 +886,15 @@ test('bridge page renders bridge token once with hardened headers', async () => 
     assert.match(html, /meta name="stackprism-agent-bridge" content="1"/)
     assert.match(html, /id="bridgeCard" class="bridge-card" data-status="waiting_extension" aria-labelledby="bridge-title" tabindex="-1"/)
     assert.match(html, /id="progressBar"/)
-    assert.match(html, /id="targetUrl" class="target-url" title=""/)
+    assert.match(html, /id="targetUrl" class="target-url" title="" target="_blank" rel="noopener noreferrer" aria-disabled="true"/)
+    assert.match(html, /id="openTargetUrl" class="preview-button target-open-link" target="_blank" rel="noopener noreferrer" aria-disabled="true" tabindex="-1"/)
     assert.match(html, /id="targetScreenshot"/)
     assert.match(html, /id="targetScreenshot" alt=""/)
     assert.match(html, /id="screenshotMeta"/)
     assert.match(html, /id="screenshotDownload"/)
     assert.match(html, /id="copyScreenshot"/)
+    assert.match(html, /id="downloadProfile"/)
+    assert.match(html, /class="preview-button profile-download-button"/)
     assert.match(html, /id="copyAllInfo"/)
     assert.match(html, /id="copyStatus"/)
     assert.match(html, /id="modalCopyStatus"/)
@@ -691,10 +925,16 @@ test('bridge page renders bridge token once with hardened headers', async () => 
     assert.match(html, /'image\/png':blob/)
     assert.match(html, /复制截图失败：浏览器未允许写入剪切板，或截图格式无法转换。/)
     assert.match(html, /截图预览无法加载/)
-    assert.match(html, /download=screenshotFilename\(\)/)
+    assert.match(html, /downloadBlob\(await fetchScreenshotBlob\(\),screenshotFilename\(\)\)/)
+    assert.match(html, /currentProfileBlob=null,currentProfileFetchPromise=null/)
+    assert.match(html, /const ensureProfileCached=\(\)=>/)
+    assert.match(html, /downloadBlob\(await ensureProfileCached\(\),profileFilename\(\)\)/)
+    assert.match(html, /if\(status==='completed'\)ensureProfileCached\(\)\.catch\(\(\)=>\{\}\)/)
+    assert.match(html, /\/profile-download/)
+    assert.doesNotMatch(html, /config\.captureId\+'\/profile'/)
     assert.match(html, /currentScreenshot\?\.mimeType==='image\/png'\?'png'/)
     assert.match(html, /currentScreenshot\?\.mimeType==='image\/webp'\?'webp'/)
-    assert.match(html, /el\.targetScreenshot\.src!==currentScreenshot\.dataUrl/)
+    assert.match(html, /currentScreenshotObjectUrl=URL\.createObjectURL\(blob\)/)
     assert.match(html, /el\.targetScreenshot\.alt='目标页面截图预览'/)
     assert.match(html, /el\.targetScreenshot\.alt=''/)
     assert.match(html, /color-scheme:light dark/)
@@ -703,7 +943,16 @@ test('bridge page renders bridge token once with hardened headers', async () => 
     assert.match(html, /class="summary-grid"/)
     assert.match(html, /class="screenshot-panel"/)
     assert.match(html, /border-radius:16px/)
-    assert.match(html, /grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/)
+    assert.match(html, /\.summary-grid\{display:grid;grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/)
+    assert.match(html, /grid-template-columns:repeat\(auto-fit,minmax\(min\(100%,300px\),1fr\)\)/)
+    assert.match(html, /\.target-copy\{min-width:0\}/)
+    assert.match(html, /\.target-url\{margin:0;display:-webkit-box;overflow:hidden;overflow-wrap:anywhere;word-break:break-word/)
+    assert.match(html, /\.content-card \*\{min-width:0;max-width:100%;overflow-wrap:anywhere;word-break:break-word\}/)
+    assert.match(html, /\.content-card\{min-width:0;min-height:88px;padding:10px;overflow:hidden/)
+    assert.match(html, /\.content-card ul\{display:grid;min-width:0;gap:3px/)
+    assert.match(html, /\.content-card li\{min-width:0;line-height:1\.38;white-space:normal\}/)
+    assert.doesNotMatch(bridgePageStyle, /@media \(max-width:980px\)\{[^}]*\.content-grid/)
+    assert.doesNotMatch(bridgePageStyle, /@media \(max-width:760px\)\{[^}]*\.content-grid/)
     assert.match(html, /--sp-neutral-line:#e5e9ee/)
     assert.match(html, /grid-template-columns:minmax\(0,1\.22fr\) minmax\(320px,\.82fr\)/)
     assert.match(html, /class="summary-handoff" aria-label="摘要包含"/)
@@ -714,6 +963,17 @@ test('bridge page renders bridge token once with hardened headers', async () => 
     assert.match(html, /object-fit:cover/)
     assert.match(html, /object-position:top center/)
     assert.match(html, /-webkit-line-clamp:2/)
+    assert.match(html, /\.target-url\[href\]\{cursor:pointer\}/)
+    assert.match(html, /\.target-url\[href\]:hover\{text-decoration:underline/)
+    assert.match(html, /\.target-actions\{display:flex;min-width:0;flex-wrap:wrap;gap:10px;justify-content:flex-end\}/)
+    assert.match(html, /\.target-open-link\{min-width:132px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none\}/)
+    assert.match(html, /\.preview-button:disabled,.modal-close:disabled,.preview-button\[aria-disabled="true"\]\{cursor:not-allowed/)
+    assert.match(html, /targetHrefFor=value=>/)
+    assert.match(html, /url\.pathname\.includes\('\[redacted\]'\)/)
+    assert.match(html, /url\.search\.includes\('\[redacted\]'\)/)
+    assert.match(html, /setTargetUrl\(targetText\)/)
+    assert.match(html, /setTargetLink\(el\.openTargetUrl,targetHref\)/)
+    assert.match(html, /node\.removeAttribute\('aria-disabled'\)/)
     assert.match(html, /\.bridge-header\{position:relative;display:block/)
     assert.match(html, /\.summary-handoff\{display:none\}/)
     assert.match(html, /class="target-actions"/)
@@ -727,7 +987,10 @@ test('bridge page renders bridge token once with hardened headers', async () => 
     assert.match(html, /setScreenshotState\('截图可用','ready'\)/)
     assert.match(html, /setStepsOpen\(false\)/)
     assert.match(html, /addEventListener\('click',\(\)=>setStepsOpen\(!stepsOpen,true\)\)/)
-    assert.match(html, /\.preview-button:disabled,.modal-close:disabled\{cursor:not-allowed;opacity:1;background:#f7fbfa/)
+    assert.match(
+      html,
+      /\.preview-button:disabled,.modal-close:disabled,.preview-button\[aria-disabled="true"\]\{cursor:not-allowed;opacity:1;background:#f7fbfa/,
+    )
     assert.match(html, /setCopyStatus\(modalOpen\(\)\?el\.modalCopyStatus:el\.copyStatus,value,type\)/)
     assert.match(html, /const restore=el\.screenshotFrame\.disabled\?el\.bridgeCard:el\.screenshotFrame/)
     assert.match(html, /if\(current\|\|failedCurrent\)step\.setAttribute\('aria-current','step'\)/)
@@ -756,7 +1019,7 @@ test('bridge page renders bridge token once with hardened headers', async () => 
     assert.match(html, /本页只服务当前一次采集/)
     assert.match(html, /摘要不含 token、nonce、raw JSON 或截图 data URL/)
     assert.match(html, /Agent 可读内容/)
-    assert.match(html, /完整 raw profile 仍需 API token 读取/)
+    assert.match(html, /完整 Profile 可在本页完成后下载/)
     assert.match(html, new RegExp(`id="stackprism-agent-bridge-config" type="application/json" nonce="${cspNonce}"`))
     assert.match(html, new RegExp(`<style nonce="${cspNonce}"`))
     assert.match(html, new RegExp(`<script nonce="${cspNonce}"`))
@@ -764,10 +1027,30 @@ test('bridge page renders bridge token once with hardened headers', async () => 
     assert.match(html, /textContent=value/)
     assert.match(html, /"bridgeToken":"spbt_[A-Za-z0-9_-]{43}"/)
     assert.match(html, /"targetUrl":"https:\/\/93\.184\.216\.34\/app\?\[redacted\]"/)
+    assert.doesNotMatch(html, /"targetHref":/)
 
     const second = await readJson(await fetch(created.body.bridgeUrl))
     assert.equal(second.status, 409)
     assert.equal(second.body.error.code, 'INVALID_REQUEST')
+    assert.equal(second.body.error.message, 'Bridge token has already been rendered or claimed.')
+  })
+})
+
+test('bridge page concurrent requests render only one bridge token', async () => {
+  await withBridge(async ready => {
+    const created = await createCapture(ready)
+    const responses = await Promise.all([fetch(created.body.bridgeUrl), fetch(created.body.bridgeUrl)])
+    const statuses = responses.map(response => response.status).sort((left, right) => left - right)
+    const bodies = await Promise.all(
+      responses.map(async response => ({
+        status: response.status,
+        text: await response.text()
+      }))
+    )
+    assert.deepEqual(statuses, [200, 409])
+    const rejected = bodies.find(body => body.status === 409)
+    assert.match(rejected.text, /Bridge token has already been rendered or claimed/)
+    assert.equal(bodies.filter(body => /spbt_[A-Za-z0-9_-]{43}/.test(body.text)).length, 1)
   })
 })
 
@@ -886,6 +1169,16 @@ test('bridge page and profile endpoint do not render tokens after completed resu
       assert.equal(expiredProfile.body.error.code, 'CAPTURE_RESULT_EXPIRED')
       assertJsonSecurityHeaders(expiredProfile, { referrerPolicy: true })
 
+      const expiredDownload = await readJson(
+        await fetch(`${ready.baseUrl}/v1/captures/${created.body.id}/profile-download`, {
+          headers: auth(config.bridgeToken)
+        })
+      )
+      assert.equal(expiredDownload.status, 410)
+      assert.equal(expiredDownload.body.error.code, 'CAPTURE_RESULT_EXPIRED')
+      assertJsonSecurityHeaders(expiredDownload, { referrerPolicy: true })
+      assert.equal(expiredDownload.headers.get('content-disposition'), `attachment; filename="stackprism-${created.body.id}-profile.json"`)
+
       const expiredPage = await fetch(created.body.bridgeUrl)
       const expiredHtml = await expiredPage.text()
       assert.equal(expiredPage.status, 410)
@@ -989,10 +1282,18 @@ test('bridge token can fetch request and post profile but cannot read profile', 
       })
     )
     assert.equal(posted.status, 200)
+    const captureRecord = ready.store.get(created.body.id)
+    assert.equal(captureRecord.profile.visualProfile.screenshot.dataUrl, undefined)
+    assert.equal(captureRecord.screenshotAsset.bytes.toString('utf8'), 'fake-jpeg')
+    assert.equal(captureRecord.screenshotAsset.metadata.scope, 'visible_viewport')
     assertJsonSecurityHeaders(posted)
     assert.equal(posted.body.status, 'completed')
     assert.equal(posted.body.preview.targetUrl, 'https://93.184.216.34/app?[redacted]')
-    assert.equal(posted.body.preview.screenshot.dataUrl, 'data:image/jpeg;base64,ZmFrZS1qcGVn')
+    assert.equal(posted.body.preview.screenshot.dataUrl, undefined)
+    assert.match(
+      posted.body.preview.screenshot.downloadUrl,
+      new RegExp(`^${ready.baseUrl}/v1/captures/${created.body.id}/screenshot-download/shot_[A-Za-z0-9_-]{43}$`)
+    )
     assert.equal(posted.body.preview.screenshot.scope, 'visible_viewport')
     assert.equal(posted.body.preview.contentSummary.cards[0].title, '复刻建议')
     assert.equal(
@@ -1029,8 +1330,56 @@ test('bridge token can fetch request and post profile but cannot read profile', 
     assert.equal(completedStatus.status, 200)
     assert.equal(completedStatus.body.preview.targetUrl, 'https://93.184.216.34/app?[redacted]')
     assert.equal(completedStatus.body.preview.screenshot.mimeType, 'image/jpeg')
+    assert.equal(completedStatus.body.preview.screenshot.downloadUrl, posted.body.preview.screenshot.downloadUrl)
     assert.equal(completedStatus.body.preview.copyText, posted.body.preview.copyText)
     assert.equal(JSON.stringify(completedStatus.body).includes('not for bridge status'), false)
+
+    const downloaded = await readJson(
+      await fetch(`${ready.baseUrl}/v1/captures/${created.body.id}/profile-download`, { headers: auth(config.bridgeToken) })
+    )
+    assert.equal(downloaded.status, 200)
+    assertJsonSecurityHeaders(downloaded, { referrerPolicy: true })
+    assert.equal(downloaded.headers.get('content-disposition'), `attachment; filename="stackprism-${created.body.id}-profile.json"`)
+    assert.equal(downloaded.body.schema, 'stackprism.site_experience_profile.v1')
+    assert.equal(downloaded.body.captureId, created.body.id)
+    assert.equal(downloaded.body.visualProfile.screenshot.dataUrl, undefined)
+    assert.equal(downloaded.body.visualProfile.screenshot.downloadUrl, posted.body.preview.screenshot.downloadUrl)
+    assert.equal(downloaded.body.visualProfile.screenshot.downloadMethod, 'GET')
+    assert.equal(downloaded.body.visualProfile.screenshot.lifecycle.requiresLocalBridge, true)
+    assert.match(downloaded.body.visualProfile.screenshot.lifecycle.availableUntil, /^\d{4}-\d{2}-\d{2}T/)
+    assert.match(downloaded.body.visualProfile.screenshot.lifecycle.note, /before the local bridge process exits/)
+    assert.match(downloaded.body.visualProfile.screenshot.note, /base64 is intentionally omitted/)
+    assert.match(downloaded.body.visualProfile.screenshot.profileJsonNote, /standard JSON and cannot contain comments/)
+    assert.equal(downloaded.body.agentGuidance.recreationPlan.visualReference.screenshotBase64Included, false)
+    assert.equal(downloaded.body.agentGuidance.recreationPlan.visualReference.screenshotIncluded, true)
+    assert.match(
+      downloaded.body.agentGuidance.recreationPlan.visualReference.screenshotProfileJsonNote,
+      /standard JSON and cannot contain comments/
+    )
+    assert.equal(
+      downloaded.body.agentGuidance.recreationPlan.visualReference.screenshotDownloadUrl,
+      posted.body.preview.screenshot.downloadUrl
+    )
+
+    const screenshotDownload = await readBytes(await fetch(downloaded.body.visualProfile.screenshot.downloadUrl))
+    assert.equal(screenshotDownload.status, 200)
+    assert.equal(screenshotDownload.headers.get('content-type'), 'image/jpeg')
+    assert.equal(screenshotDownload.headers.get('content-disposition'), `attachment; filename="stackprism-${created.body.id}-screenshot.jpg"`)
+    assert.equal(screenshotDownload.body.toString('utf8'), 'fake-jpeg')
+
+    const badScreenshotUrl = `${ready.baseUrl}/v1/captures/${created.body.id}/screenshot-download/shot_${'x'.repeat(43)}`
+    const missingScreenshotAuth = await readJson(await fetch(badScreenshotUrl))
+    assert.equal(missingScreenshotAuth.status, 401)
+    assert.equal(missingScreenshotAuth.body.error.code, 'UNAUTHORIZED')
+    const badScreenshotDownload = await readJson(await fetch(badScreenshotUrl, { headers: auth(config.bridgeToken) }))
+    assert.equal(badScreenshotDownload.status, 403)
+    assert.equal(badScreenshotDownload.body.error.code, 'FORBIDDEN')
+
+    const downloadReadyStatus = await readJson(
+      await fetch(`${ready.baseUrl}/v1/captures/${created.body.id}`, { headers: auth(ready.apiToken) })
+    )
+    assert.equal(downloadReadyStatus.status, 200)
+    assert.equal(downloadReadyStatus.body.profileDownloadReady, true)
 
     const forbidden = await readJson(
       await fetch(`${ready.baseUrl}/v1/captures/${created.body.id}/profile`, { headers: auth(config.bridgeToken) })
@@ -1045,6 +1394,7 @@ test('bridge token can fetch request and post profile but cannot read profile', 
     assert.equal(fetched.status, 200)
     assertJsonSecurityHeaders(fetched, { referrerPolicy: true })
     assert.equal(fetched.body.schema, 'stackprism.site_experience_profile.v1')
+    assert.equal(fetched.body.visualProfile.screenshot.dataUrl, undefined)
   })
 })
 
@@ -1075,6 +1425,63 @@ test('bridge status preview derives screenshot mime type from the data URL', asy
     assert.equal(posted.status, 200)
     assert.equal(posted.body.preview.screenshot.mimeType, 'image/png')
   })
+})
+
+test('profile reads and public screenshot downloads refresh result TTL', async () => {
+  let now = 1000
+  await withBridge(
+    async ready => {
+      const created = await createCapture(ready)
+      const config = await loadBridgeConfig(created.body.bridgeUrl)
+      await acceptFinalUrl(ready, created.body.id, config.bridgeToken)
+      const profile = profileFor(created.body.id, {
+        visualProfile: {
+          screenshot: {
+            dataUrl: 'data:image/png;base64,ZmFrZS1wbmc=',
+            mimeType: 'image/png',
+            byteLength: 8,
+            scope: 'visible_viewport'
+          }
+        },
+        agentGuidance: { recreationPlan: { visualReference: {} } }
+      })
+      const posted = await readJson(
+        await fetch(`${ready.baseUrl}/v1/captures/${created.body.id}/profile`, {
+          method: 'POST',
+          headers: { ...auth(config.bridgeToken), 'Content-Type': 'application/json' },
+          body: JSON.stringify(profile)
+        })
+      )
+      assert.equal(posted.status, 200)
+      const capture = ready.store.get(created.body.id)
+      const firstExpiry = capture.resultExpiresAt
+
+      now = firstExpiry - 1
+      const profileRead = await readJson(await fetch(`${ready.baseUrl}/v1/captures/${created.body.id}/profile`, { headers: auth(ready.apiToken) }))
+      assert.equal(profileRead.status, 200)
+      assert.equal(profileRead.body.visualProfile.screenshot.dataUrl, undefined)
+      assert.equal(capture.resultExpiresAt, now + 100)
+      assert.ok(capture.resultExpiresAt > firstExpiry)
+
+      now = firstExpiry + 1
+      const screenshot = await readBytes(await fetch(profileRead.body.visualProfile.screenshot.downloadUrl))
+      assert.equal(screenshot.status, 200)
+      assert.equal(screenshot.headers.get('content-type'), 'image/png')
+      assert.equal(screenshot.body.toString('utf8'), 'fake-png')
+      assert.equal(capture.profile.visualProfile.screenshot.dataUrl, undefined)
+      assert.equal(capture.screenshotAsset.bytes.toString('utf8'), 'fake-png')
+      assert.equal(capture.resultExpiresAt, now + 100)
+      assert.ok(capture.resultExpiresAt > firstExpiry + 99)
+
+      now = capture.resultExpiresAt + 1
+      const expiredScreenshot = await readJson(await fetch(profileRead.body.visualProfile.screenshot.downloadUrl))
+      assert.equal(expiredScreenshot.status, 410)
+      assert.equal(expiredScreenshot.body.error.code, 'CAPTURE_RESULT_EXPIRED')
+      assert.equal(capture.profile, null)
+      assert.equal(capture.screenshotAsset, null)
+    },
+    { now: () => now, resultTtlMs: 100 }
+  )
 })
 
 test('js bridge rejects repeated and oversized profile submissions', async () => {
@@ -1556,6 +1963,24 @@ test('bridge cli rejects occupied configured port before ready output', async ()
   }
 })
 
+test('bridge cli startup failure code is part of the bridge error contract', async () => {
+  const { isKnownBridgeErrorCode, sanitizeBridgeError } = await import('../agent-skill/stackprism-site-experience/scripts/bridge/protocol.mjs')
+
+  assert.equal(isKnownBridgeErrorCode('BRIDGE_START_FAILED'), true)
+  assert.equal(isKnownBridgeErrorCode('BRIDGE_PAGE_RENDER_FAILED'), true)
+  assert.equal(sanitizeBridgeError({ code: 'BRIDGE_START_FAILED', message: 'Bridge server startup failed.' }).code, 'BRIDGE_START_FAILED')
+  assert.equal(sanitizeBridgeError({ code: 'BRIDGE_PAGE_RENDER_FAILED', message: 'Bridge page render failed.' }).code, 'BRIDGE_PAGE_RENDER_FAILED')
+  const sanitized = sanitizeBridgeError({
+    code: 'INVALID_REQUEST',
+    message: `screenshot shot_${'a'.repeat(43)} failed`,
+    details: {
+      url: `http://127.0.0.1:17370/v1/captures/cap_1234567890123456789012/screenshot-download/shot_${'b'.repeat(43)}`
+    }
+  })
+  assert.equal(sanitized.message, 'screenshot [redacted-id] failed')
+  assert.equal(JSON.stringify(sanitized).includes('shot_'), false)
+})
+
 test('bridge cli prints exactly one ready json line after server bind', async () => {
   const child = spawn(process.execPath, ['agent-skill/stackprism-site-experience/scripts/stackprism-bridge.mjs'], {
     cwd: new URL('..', import.meta.url),
@@ -1612,13 +2037,13 @@ test('bridge cli exits and closes listener on SIGTERM', async () => {
 })
 
 test('capture-site helper terminal settle parser defaults invalid nullable values', () => {
-  assert.equal(parseTerminalSettleMs(undefined), 1500)
-  assert.equal(parseTerminalSettleMs(null), 1500)
-  assert.equal(parseTerminalSettleMs(''), 1500)
+  assert.equal(parseTerminalSettleMs(undefined), 3000)
+  assert.equal(parseTerminalSettleMs(null), 3000)
+  assert.equal(parseTerminalSettleMs(''), 3000)
   assert.equal(parseTerminalSettleMs('0'), 0)
   assert.equal(parseTerminalSettleMs('5000'), 5000)
-  assert.equal(parseTerminalSettleMs('5001'), 1500)
-  assert.equal(parseTerminalSettleMs('invalid'), 1500)
+  assert.equal(parseTerminalSettleMs('5001'), 3000)
+  assert.equal(parseTerminalSettleMs('invalid'), 3000)
 })
 
 test('capture-site helper keeps bridge stdin open and writes profile artifacts', async () => {
@@ -1628,12 +2053,19 @@ test('capture-site helper keeps bridge stdin open and writes profile artifacts',
   const resultPath = join(tempDir, 'result.json')
   const screenshotPath = join(tempDir, 'screenshot.jpg')
   const logPath = join(tempDir, 'fake-bridge-log.json')
-  const screenshotDataUrl = `data:image/jpeg;base64,${Buffer.from('fake jpeg').toString('base64')}`
   const fakeProfile = profileFor('pending', {
     target: { url: 'https://example.test/', finalUrl: 'https://example.test/final', language: 'en' },
     techProfile: { technologies: [{ name: 'Vue' }, { name: 'Vite' }] },
-    visualProfile: { screenshot: { dataUrl: screenshotDataUrl, mimeType: 'image/jpeg', byteLength: 9, scope: 'visible_viewport' } },
-    agentGuidance: { recreationPlan: { implementationOrder: ['layout'] } }
+    visualProfile: {
+      screenshot: {
+        downloadUrl: 'pending',
+        mimeType: 'image/jpeg',
+        byteLength: 9,
+        scope: 'visible_viewport',
+        note: 'Screenshot image base64 is intentionally omitted from this Profile JSON.'
+      }
+    },
+    agentGuidance: { recreationPlan: { implementationOrder: ['layout'], visualReference: {} } }
   })
 
   writeFileSync(
@@ -1646,8 +2078,20 @@ let captureId = 'cap_1234567890123456789012'
 let requestBody = null
 let profile = ${JSON.stringify(fakeProfile)}
 let statusReads = 0
+const downloadableProfile = () => ({
+  ...profile,
+  captureId,
+  visualProfile: {
+    screenshot: {
+      ...profile.visualProfile.screenshot,
+      downloadUrl: 'http://127.0.0.1:' + server.address().port + '/v1/captures/' + captureId + '/screenshot-download'
+    }
+  }
+})
 let stdinEnded = false
 let completedAt = 0
+let profileDownloadedAt = 0
+let screenshotDownloadedAt = 0
 let stdinEndedAt = 0
 const token = 'spb_${'a'.repeat(43)}'
 const server = http.createServer((req, res) => {
@@ -1666,11 +2110,25 @@ const server = http.createServer((req, res) => {
     if (req.url === '/v1/captures/' + captureId) {
       statusReads += 1
       if (statusReads >= 2 && !completedAt) completedAt = Date.now()
-      return send(200, { id: captureId, status: statusReads < 2 ? 'running' : 'completed', phase: statusReads < 2 ? 'target_loaded' : 'cleanup' })
+      return send(200, {
+        id: captureId,
+        status: statusReads < 2 ? 'running' : 'completed',
+        phase: statusReads < 2 ? 'target_loaded' : 'cleanup',
+        profileDownloadReady: profileDownloadedAt > 0
+      })
     }
     if (req.url === '/v1/captures/' + captureId + '/profile') {
-      profile = { ...profile, captureId }
-      return send(200, profile)
+      return send(200, downloadableProfile())
+    }
+    if (req.url === '/v1/captures/' + captureId + '/profile-download') {
+      profileDownloadedAt = Date.now()
+      return send(200, downloadableProfile())
+    }
+    if (req.url === '/v1/captures/' + captureId + '/screenshot-download') {
+      screenshotDownloadedAt = Date.now()
+      res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Content-Length': '9' })
+      res.end('fake jpeg')
+      return
     }
     return send(404, { error: { code: 'NOT_FOUND' } })
   })
@@ -1690,7 +2148,7 @@ server.listen(0, '127.0.0.1', () => {
 process.stdin.on('end', () => {
   stdinEnded = true
   stdinEndedAt = Date.now()
-  writeFileSync(logPath, JSON.stringify({ stdinEnded, requestBody, statusReads, completedAt, stdinEndedAt }))
+  writeFileSync(logPath, JSON.stringify({ stdinEnded, requestBody, statusReads, completedAt, profileDownloadedAt, screenshotDownloadedAt, stdinEndedAt }))
   server.close(() => process.exit(0))
 })
 process.stdin.resume()
@@ -1743,16 +2201,124 @@ process.stdin.resume()
     assert.equal(summary.finalUrl, 'https://example.test/final')
     assert.equal(summary.screenshotPresent, true)
     assert.equal(summary.screenshotWritten, true)
+    assert.equal(summary.profileDownloadReady, true)
     assert.equal(result.techCount, 2)
     assert.equal(result.screenshotWritten, true)
+    assert.equal(result.screenshotPath, screenshotPath)
+    assert.equal(result.screenshotDownloadUrl, pathToFileURL(screenshotPath).href)
+    assert.equal(result.profileDownloadReady, true)
     assert.equal(writtenProfile.captureId, 'cap_1234567890123456789012')
+    assert.equal(writtenProfile.visualProfile.screenshot.downloadUrl, pathToFileURL(screenshotPath).href)
+    assert.equal(writtenProfile.visualProfile.screenshot.downloadMethod, 'file')
+    assert.equal(writtenProfile.visualProfile.screenshot.localPath, screenshotPath)
+    assert.equal(writtenProfile.visualProfile.screenshot.lifecycle.requiresLocalBridge, false)
+    assert.equal(writtenProfile.visualProfile.screenshot.lifecycle.availableUntil, '')
+    assert.match(writtenProfile.visualProfile.screenshot.lifecycle.note, /localPath/)
+    assert.doesNotMatch(JSON.stringify(writtenProfile), /127\.0\.0\.1/)
+    assert.doesNotMatch(JSON.stringify(writtenProfile), /data:image\/[a-z]+;base64/)
+    assert.equal(writtenProfile.agentGuidance.recreationPlan.visualReference.screenshotDownloadUrl, pathToFileURL(screenshotPath).href)
+    assert.equal(writtenProfile.agentGuidance.recreationPlan.visualReference.screenshotLocalPath, screenshotPath)
     assert.equal(readFileSync(screenshotPath, 'utf8'), 'fake jpeg')
     assert.equal(fakeBridgeLog.stdinEnded, true)
     assert.equal(fakeBridgeLog.requestBody.options.targetMode, 'new_tab')
+    assert.equal(fakeBridgeLog.requestBody.options.forceRefresh, false)
     assert.equal(fakeBridgeLog.requestBody.options.captureScreenshot, true)
     assert.equal(fakeBridgeLog.requestBody.options.allowPrivateNetworkTarget, false)
     assert.equal(fakeBridgeLog.statusReads >= 2, true)
+    assert.equal(fakeBridgeLog.profileDownloadedAt > 0, true)
+    assert.equal(fakeBridgeLog.screenshotDownloadedAt > 0, true)
+    assert.equal(fakeBridgeLog.screenshotDownloadedAt >= fakeBridgeLog.profileDownloadedAt, true)
+    assert.equal(fakeBridgeLog.stdinEndedAt >= fakeBridgeLog.screenshotDownloadedAt, true)
     assert.equal(fakeBridgeLog.stdinEndedAt - fakeBridgeLog.completedAt >= 40, true)
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true })
+  }
+})
+
+test('capture-site helper can explicitly force-refresh the fresh target tab', async () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'stackprism-capture-site-force-refresh-'))
+  const fakeBridgePath = join(tempDir, 'fake-bridge-force-refresh.mjs')
+  const profilePath = join(tempDir, 'profile.json')
+  const logPath = join(tempDir, 'fake-bridge-log.json')
+  const fakeProfile = profileFor('pending', {
+    target: { url: 'https://example.test/', finalUrl: 'https://example.test/final', language: 'en' },
+    techProfile: { technologies: [] },
+    agentGuidance: { recreationPlan: { implementationOrder: ['layout'] } }
+  })
+
+  writeFileSync(
+    fakeBridgePath,
+    `
+import http from 'node:http'
+import { writeFileSync } from 'node:fs'
+const logPath = ${JSON.stringify(logPath)}
+const captureId = 'cap_1234567890123456789012'
+const profile = ${JSON.stringify(fakeProfile)}
+let requestBody = null
+const token = 'spb_${'d'.repeat(43)}'
+const server = http.createServer((req, res) => {
+  const chunks = []
+  req.on('data', chunk => chunks.push(chunk))
+  req.on('end', () => {
+    const send = (status, body) => {
+      res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify(body))
+    }
+    if (req.method === 'POST' && req.url === '/v1/captures') {
+      requestBody = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+      return send(200, { id: captureId, status: 'queued' })
+    }
+    if (req.url === '/v1/captures/' + captureId) return send(200, { id: captureId, status: 'completed', phase: 'cleanup' })
+    if (req.url === '/v1/captures/' + captureId + '/profile') return send(200, { ...profile, captureId })
+    if (req.url === '/v1/captures/' + captureId + '/profile-download') return send(200, { ...profile, captureId })
+    return send(404, { error: { code: 'NOT_FOUND' } })
+  })
+})
+server.listen(0, '127.0.0.1', () => {
+  const port = server.address().port
+  process.stdout.write(JSON.stringify({
+    event: 'stackprism-bridge-ready',
+    protocolVersion: 1,
+    baseUrl: 'http://127.0.0.1:' + port,
+    healthUrl: 'http://127.0.0.1:' + port + '/health',
+    apiToken: token
+  }) + '\\n')
+})
+process.stdin.on('end', () => {
+  writeFileSync(logPath, JSON.stringify({ requestBody }))
+  server.close(() => process.exit(0))
+})
+process.stdin.resume()
+`,
+    'utf8'
+  )
+
+  try {
+    const child = spawn(
+      process.execPath,
+      [
+        'agent-skill/stackprism-site-experience/scripts/capture-site.mjs',
+        '--url',
+        'https://example.test/',
+        '--out',
+        profilePath,
+        '--force-refresh'
+      ],
+      {
+        cwd: new URL('..', import.meta.url),
+        env: { ...process.env, STACKPRISM_CAPTURE_BRIDGE_SCRIPT: fakeBridgePath, STACKPRISM_CAPTURE_TERMINAL_SETTLE_MS: '50' },
+        stdio: ['ignore', 'pipe', 'pipe']
+      }
+    )
+    let stderr = ''
+    child.stderr.on('data', chunk => {
+      stderr += String(chunk)
+    })
+    const [code] = await once(child, 'exit')
+    assert.equal(code, 0, stderr)
+    const fakeBridgeLog = JSON.parse(readFileSync(logPath, 'utf8'))
+    assert.equal(fakeBridgeLog.requestBody.options.targetMode, 'new_tab')
+    assert.equal(fakeBridgeLog.requestBody.options.forceRefresh, true)
   } finally {
     rmSync(tempDir, { recursive: true, force: true })
   }
@@ -1774,7 +2340,19 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify(body))
   }
   if (req.method === 'POST' && req.url === '/v1/captures') return send(200, { id: captureId, status: 'queued' })
-  if (req.url === '/v1/captures/' + captureId) return send(200, { id: captureId, status: 'failed', phase: 'cleanup', error: { code: 'TARGET_LOAD_FAILED', message: 'Target failed.' } })
+  if (req.url === '/v1/captures/' + captureId) return send(200, {
+    id: captureId,
+    status: 'failed',
+    phase: 'cleanup',
+    error: {
+      code: 'TARGET_LOAD_FAILED',
+      message: 'Target failed while loading https://example.test/app?token=secret&apiToken=spb_${'d'.repeat(43)}#frag.',
+      details: {
+        url: 'https://example.test/app?token=secret&apiToken=spb_${'d'.repeat(43)}#frag',
+        authorization: 'Bearer spb_${'d'.repeat(43)}'
+      }
+    }
+  })
   return send(404, { error: { code: 'NOT_FOUND' } })
 })
 server.listen(0, '127.0.0.1', () => {
@@ -1805,6 +2383,66 @@ process.stdin.resume()
     const error = JSON.parse(stderr.trim())
     assert.notEqual(code, 0)
     assert.equal(error.error.code, 'TARGET_LOAD_FAILED')
+    assert.doesNotMatch(stderr, /token=secret|apiToken=|Bearer spb_|#frag/)
+    assert.match(stderr, /\[redacted/)
+    assert.equal(existsSync(profilePath), false)
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true })
+  }
+})
+
+test('capture-site helper does not use nonstandard error bodies as stderr codes', async () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'stackprism-capture-site-nonstandard-error-'))
+  const fakeBridgePath = join(tempDir, 'fake-bridge-nonstandard-error.mjs')
+  const profilePath = join(tempDir, 'profile.json')
+  writeFileSync(
+    fakeBridgePath,
+    `
+import http from 'node:http'
+const token = 'spb_${'e'.repeat(43)}'
+const server = http.createServer((req, res) => {
+  res.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' })
+  res.end(JSON.stringify({
+    error: {
+      message: 'Proxy failed https://example.test/app?token=secret&apiToken=spb_${'e'.repeat(43)}#frag',
+      details: {
+        url: 'https://example.test/app?token=secret&apiToken=spb_${'e'.repeat(43)}#frag',
+        authorization: 'Bearer spb_${'e'.repeat(43)}'
+      }
+    }
+  }))
+})
+server.listen(0, '127.0.0.1', () => {
+  const port = server.address().port
+  process.stdout.write(JSON.stringify({ event: 'stackprism-bridge-ready', protocolVersion: 1, baseUrl: 'http://127.0.0.1:' + port, healthUrl: 'http://127.0.0.1:' + port + '/health', apiToken: token }) + '\\n')
+})
+process.stdin.on('end', () => server.close(() => process.exit(0)))
+process.stdin.resume()
+`,
+    'utf8'
+  )
+
+  try {
+    const child = spawn(
+      process.execPath,
+      ['agent-skill/stackprism-site-experience/scripts/capture-site.mjs', '--url', 'https://example.test/', '--out', profilePath],
+      {
+        cwd: new URL('..', import.meta.url),
+        env: { ...process.env, STACKPRISM_CAPTURE_BRIDGE_SCRIPT: fakeBridgePath },
+        stdio: ['ignore', 'pipe', 'pipe']
+      }
+    )
+    let stderr = ''
+    child.stderr.on('data', chunk => {
+      stderr += String(chunk)
+    })
+    const [code] = await once(child, 'exit')
+    const error = JSON.parse(stderr.trim())
+
+    assert.notEqual(code, 0)
+    assert.equal(error.error.code, 'CAPTURE_FAILED')
+    assert.doesNotMatch(stderr, /token=secret|apiToken=|Bearer spb_|#frag/)
+    assert.match(stderr, /\[redacted/)
     assert.equal(existsSync(profilePath), false)
   } finally {
     rmSync(tempDir, { recursive: true, force: true })
@@ -2436,6 +3074,16 @@ test('js bridge restricts bridge-token terminal status updates', async () => {
     )
     assert.equal(failedWithoutError.status, 400)
     assert.equal(failedWithoutError.body.error.code, 'INVALID_REQUEST')
+
+    const failedWithNullError = await readJson(
+      await fetch(statusUrl, {
+        method: 'POST',
+        headers: { ...auth(config.bridgeToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(statusBody(created.body.id, config, { status: 'failed', phase: 'cleanup', sequence: 1, error: null }))
+      })
+    )
+    assert.equal(failedWithNullError.status, 400)
+    assert.equal(failedWithNullError.body.error.code, 'INVALID_REQUEST')
 
     const failedUnknownCode = await readJson(
       await fetch(statusUrl, {
