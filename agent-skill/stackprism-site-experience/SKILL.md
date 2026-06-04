@@ -40,11 +40,15 @@ node agent-skill/stackprism-site-experience/scripts/capture-site.mjs \
 
 Set `STACKPRISM_BROWSER_OPEN_COMMAND` and `STACKPRISM_BROWSER_OPEN_ARGS_JSON` only when the default opener is not the browser/profile with StackPrism installed. On macOS, for example, use `STACKPRISM_BROWSER_OPEN_COMMAND=open` and `STACKPRISM_BROWSER_OPEN_ARGS_JSON='["-a","Google Chrome"]'` to force Chrome.
 
-The helper prints one JSON summary on stdout. `screenshotPresent` means the profile contains screenshot evidence; `screenshotWritten` means the optional `--screenshot-out` file was actually written and can be opened by image-capable coding tools.
+The helper prints one JSON summary on stdout. `screenshotPresent` means the profile contains screenshot evidence; `screenshotWritten` means the screenshot image was written to `screenshotPath` and can be opened by image-capable coding tools. If `--screenshot-out` is omitted, the helper writes a sidecar image next to `--out` and rewrites the Profile screenshot reference to that local file URL before saving the JSON.
+
+By default the helper opens a fresh target tab and does not force-refresh it. Use `--force-refresh` only when you need a controlled cache-bypass capture; this avoids treating browser-superseded initial navigations as target load failures on large public sites.
 
 Each bridge API request has a bounded timeout. The default is 30000 ms; use `--request-timeout-ms <ms>` only when a slower local browser opener or debug bridge needs more time. If it exits with `BRIDGE_REQUEST_TIMEOUT`, stop that attempt and start one fresh helper process rather than reusing a partial capture.
 
-The opened bridge page is also a local result workbench. After completion it shows the target URL, screenshot preview, click-to-enlarge preview, screenshot download/copy buttons, a one-click Markdown summary, and grouped profile content cards. That page only uses the bridge-token status preview; it cannot read raw `/profile`. For programmatic use, prefer the helper output or the API-token profile endpoint.
+The opened bridge page is also a local result workbench. After completion it shows the target URL, screenshot preview, click-to-enlarge preview, screenshot download/copy buttons, a Profile download button for the current capture, a one-click Markdown summary, and grouped profile content cards. That page uses the bridge-token status preview for rendering and a current-capture download endpoint for saving the completed Profile; direct raw `/profile` API reads still require the API token. For programmatic use, prefer the helper output or the API-token profile endpoint.
+
+Profile JSON is standard JSON and cannot contain comments. Screenshot handling instructions are carried in `visualProfile.screenshot.note`, `visualProfile.screenshot.profileJsonNote`, and `agentGuidance.recreationPlan.visualReference.screenshotDownloadHint`.
 
 If the helper exits with `PRIVATE_NETWORK_TARGET_BLOCKED` for a local development, direct private IP, or real intranet target, run a second fresh helper process with `--allow-private-network` and record that this was a controlled override. Do not reuse the first bridge URL, capture id, session, or token. Do not add `--allow-private-network` just because a public hostname is routed through `198.18.0.0/15`; that proxy/TUN case is allowed by default.
 
@@ -100,7 +104,7 @@ Call `POST /v1/captures` with `Authorization: Bearer {apiToken}`:
   "include": ["tech", "visual", "layout", "components", "interaction", "ux", "assets"],
   "viewports": [{ "name": "desktop", "width": 1440, "height": 900, "deviceScaleFactor": 1 }],
   "options": {
-    "forceRefresh": true,
+    "forceRefresh": false,
     "captureScreenshotMetadata": false,
     "captureScreenshot": false,
     "keepTabOpen": false,
@@ -115,7 +119,7 @@ Use the real target URL for the task. Do not treat `https://example.com` as the 
 
 Then poll `GET /v1/captures/{id}` and read `GET /v1/captures/{id}/profile` when status is `completed`.
 
-If the consuming model can read images, set `"captureScreenshot": true` with `include` containing `"visual"`. The profile will include `visualProfile.screenshot.dataUrl` when Chrome can capture the visible target viewport. This can briefly activate the target tab before returning to the bridge page. Treat it as optional evidence; models without image input should ignore it. The screenshot is kept in the bridge's in-memory profile and is cleared when the completed profile TTL expires or the bridge process exits. A user-downloaded or clipboard-copied screenshot is managed by the browser or operating system and is not auto-deleted by StackPrism. The screenshot is not text-redacted pixel by pixel, so do not request it for login-protected or private user pages.
+If the consuming model can read images, set `"captureScreenshot": true` with `include` containing `"visual"`. Chrome may capture the visible target viewport and the saved Profile will expose it as `visualProfile.screenshot.downloadUrl`, not as embedded base64. To inspect actual visual appearance, download or open that image. When using `capture-site.mjs`, the helper downloads the image while the bridge is still alive and rewrites `downloadUrl` to a local `file://` URL plus `localPath`; this remains available after the bridge exits as long as the file is not moved or deleted. When reading directly from the live bridge API or manually downloading from the bridge page, the screenshot URL is a temporary `127.0.0.1` endpoint and must be used before the local bridge exits or the capture result expires. The screenshot is not text-redacted pixel by pixel, so do not request it for login-protected or private user pages.
 
 Large pages can produce multi-chunk profile transfers. If the browser extension reports `BRIDGE_TRANSPORT_DISCONNECTED`, `PROFILE_TRANSPORT_FAILED`, `PROFILE_CHUNK_MISSING`, or `CAPTURE_TIMEOUT`, treat the capture as failed, stop the bridge child process, start a new bridge, and retry once with a smaller `include` set or lower `maxResourceUrls`. Do not synthesize a profile from partial chunks.
 
@@ -128,7 +132,7 @@ Handle user-actionable failures explicitly:
 ## Use The Profile
 
 - Start from `agentGuidance.recreationPlan`. Follow its `implementationOrder`, then map `designTokens`, `layoutBlueprint`, `componentInventory`, `interactionChecklist`, `uxChecklist`, and `assetHints` into the target project.
-- Use `visualProfile.screenshot.dataUrl` as an optional visual reference only when it is present and your model supports image input.
+- Use `visualProfile.screenshot.downloadUrl` as an optional visual reference only when it is present and your model supports image input. The Profile JSON intentionally omits screenshot base64; download or open the image to see the actual visual effect.
 - Treat `techProfile` as implementation guidance, not a mandate to copy the source site's private stack.
 - Prioritize layout density, visual hierarchy, interaction feedback, and information architecture.
 - Respect `limitations`; missing fields may mean a section was not requested or was truncated.

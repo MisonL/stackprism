@@ -87,7 +87,7 @@ Agent Bridge 输出 schema 为 `stackprism.site_experience_profile.v1`。当前 
 - `target`: 规范化目标、最终 URL、标题、`language`、viewport 摘要和 capture scope。`language` 来自页面 `documentElement.lang` 或 body `lang`，为空时保持空字符串，不推断用户身份或地区。
 - `browserContext`: user agent、扩展版本、采集时间、bridge protocol version、请求的 viewport 和扩展 capabilities。
 - `techProfile`: 现有 StackPrism 技术识别结果和实现参考说明。
-- `visualProfile`: 颜色、字体、间距、形状、阴影、密度、主题和响应式视觉摘要。`options.captureScreenshot = true` 且 `include` 包含 `visual` 时，可额外输出 `screenshot.dataUrl` 作为当前可见视口的 JPEG data URL，供支持图像输入的 Agent 对照视觉效果；默认不输出截图图像。
+- `visualProfile`: 颜色、字体、间距、形状、阴影、密度、主题和响应式视觉摘要。`options.captureScreenshot = true` 且 `include` 包含 `visual` 时，扩展会用截图 data URL 把当前可见视口交给本机 bridge；bridge 保存 profile 时必须剥离 `dataUrl`，只保留临时内存截图资产和 `screenshot.downloadUrl`、`note`、生命周期字段。`capture-site.mjs` 会在 bridge 仍存活时下载截图，并把 `downloadUrl` 重写为本地 `file://` URL 与 `localPath`。
 - `layoutProfile`: landmarks、hero、grid、sticky、above-fold 和截图 metadata。`captureScreenshotMetadata = false` 时不得输出 bounding box、above-fold 细节或几何截图 metadata。
 - `componentProfile`: button、link、form、card、navigation、overlay 和 data display 模式。
 - `interactionProfile`: 仅记录 passive 可观察的 hover/focus/transition/animation/loading/scroll 线索，不点击、不提交表单、不主动打开隐藏菜单。
@@ -96,7 +96,7 @@ Agent Bridge 输出 schema 为 `stackprism.site_experience_profile.v1`。当前 
 - `evidence`、`limitations`: 记录来源覆盖、截断、未请求 section、不可访问 frame 或 shadow root 等边界。
 - `agentGuidance`: 给下游 Agent 的实现建议。当前包含摘要、优先级、注意事项和 `recreationPlan`。`recreationPlan` 把 profile 转成复刻执行层：`implementationOrder`、`designTokens`、`layoutBlueprint`、`componentInventory`、`interactionChecklist`、`uxChecklist`、`assetHints` 和 `verificationChecklist`。这些字段只引用已脱敏的 profile 内容，不能把缺失字段理解为目标站点不存在对应结构。
 
-下游 Agent 不得把 profile 当作页面完整拷贝。它是浏览器可观察事实和实现参考，不是后端私有实现或用户账号内容。截图像素只在 `captureScreenshot = true` 时显式输出，属于未做逐像素脱敏的可选视觉证据，不应用于登录态或私密页面。截图以 data URL 存在于本次 bridge 内存 profile 中，不自动写入磁盘；completed profile 10 分钟 TTL 到期或 bridge 进程退出后会清除。用户在 bridge 页面手动下载的截图文件由浏览器下载目录管理，插件不会自动删除该文件。
+下游 Agent 不得把 profile 当作页面完整拷贝。它是浏览器可观察事实和实现参考，不是后端私有实现或用户账号内容。截图像素只在 `captureScreenshot = true` 时显式采集，属于未做逐像素脱敏的可选视觉证据，不应用于登录态或私密页面。下载的 Profile JSON 是纯 JSON，不包含注释或截图 base64；如需查看实际视觉效果，Agent 应按 `visualProfile.screenshot.downloadUrl` 下载或打开图片。直接 bridge URL 只在本机 bridge 进程存活且 completed result TTL 未过期时有效；TTL 过期时 bridge 必须同时清理 profile 和临时内存截图资产。helper 写出的本地 `file://` 图片在文件被移动或删除前有效。用户在 bridge 页面手动下载的截图文件由浏览器下载目录管理，插件不会自动删除该文件。
 
 完成采集后，本地 bridge 页面会展示受限结果工作台：目标网址、截图预览、截图放大预览、下载截图、复制截图、复制 Markdown 摘要和分组 profile 内容卡片。该页面只能用 `bridgeToken` 读取 `GET /v1/captures/{id}` 的 status preview；preview 中的 `copyText` 和 `contentSummary` 由 bridge server 从已完成 profile 生成，并会脱敏 URL query、token-like id、email、手机号和 token 字段。页面不得使用 `bridgeToken` 读取 raw `/profile`，不得把 raw profile、截图 data URL、`apiToken`、`bridgeToken`、nonce 或完整敏感文本放进“一键复制全部信息”。复制截图依赖浏览器 Clipboard API，失败时必须显示错误，不得伪装成功。复制到剪切板或用户下载后的截图由浏览器/操作系统管理，不属于 StackPrism 自动清理范围。
 

@@ -8,7 +8,7 @@ Paths in this package are relative to the StackPrism repository root. If an agen
 
 ## Scripts
 
-- `scripts/capture-site.mjs`: preferred one-shot capture client. It starts the JavaScript bridge, keeps stdin open, creates the capture, polls for the completed profile, writes the profile JSON, and optionally writes the screenshot image.
+- `scripts/capture-site.mjs`: preferred one-shot capture client. It starts the JavaScript bridge, keeps stdin open, creates the capture, polls for the completed profile, writes the profile JSON, downloads the screenshot image when present, and rewrites the Profile screenshot reference to the local image file before exiting.
 - `scripts/stackprism-bridge.mjs`: JavaScript loopback bridge, preferred.
 - `scripts/stackprism_bridge.py`: Python standard-library fallback.
 
@@ -19,6 +19,10 @@ Use `capture-site.mjs` for ordinary agent work. Use `stackprism-bridge.mjs` or t
 `capture-site.mjs` bounds each bridge API request with `--request-timeout-ms`, defaulting to 30000 ms, so a stalled local bridge fails explicitly instead of hanging the calling agent.
 
 The bridge page opened in the browser becomes a result workbench after completion: target URL, screenshot preview, enlarged screenshot preview, screenshot download/copy, one-click Markdown summary, and grouped profile content cards. The page reads only the status preview with its one-capture `bridgeToken`; raw `/profile` still requires the API token.
+
+Profile JSON is standard JSON and cannot contain comments. Screenshot guidance is stored in `note`, `profileJsonNote`, and `agentGuidance.recreationPlan.visualReference.screenshotDownloadHint`. Screenshot base64 is intentionally omitted; open `visualProfile.screenshot.downloadUrl` to inspect the actual visual appearance.
+
+Lifecycle: direct bridge screenshot links are valid only while the local bridge process is running and before the completed result TTL expires. The capture helper avoids that race by downloading the image during the live bridge window and saving a stable local `file://` URL plus `localPath` in the written Profile.
 
 When selecting a non-default browser or profile, keep the opener executable and its arguments separate: `STACKPRISM_BROWSER_OPEN_COMMAND` is only the executable or platform opener, while `STACKPRISM_BROWSER_OPEN_ARGS_JSON` is a JSON string array of opener/profile arguments. The bridge URL is appended by the script as the final argv item.
 

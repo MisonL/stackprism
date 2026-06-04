@@ -134,7 +134,7 @@ Capture request validation:
 - `include` 必须是非空数组，元素只能来自 `tech`、`visual`、`layout`、`components`、`interaction`、`ux`、`assets`；重复项按固定顺序归一化。未包含的 profile section 必须返回空对象并在 `limitations` 记录 `section_not_requested`，不得运行对应重型采集后再静默丢弃。
 - `viewports` 第一版最多接受 3 项；每项 `name` 可选，必须是 ASCII 字母、数字、`-`、`_`，长度 `1..32`；`width` 范围 `320..3840`，`height` 范围 `320..2160`，`deviceScaleFactor` 范围 `1..4`。由于第一版不新增 `chrome.windows` 权限，这些值只写入 profile 请求上下文和 limitations，不得宣称真实移动仿真。
 - `options.forceRefresh`、`options.captureScreenshotMetadata`、`options.keepTabOpen`、`options.allowPrivateNetworkTarget` 必须是 boolean；缺省分别为 `false`、`false`、`false`、`false`。
-- `options.captureScreenshot` 是可选 boolean，缺省为 `false`。只有显式为 `true` 且 `include` 包含 `visual` 时，插件才尝试用 `chrome.tabs.captureVisibleTab` 采集当前可见视口 JPEG data URL；失败时必须返回 limitation，不得伪造截图。截图 data URL 只属于本次 bridge 内存 profile，不自动落盘；用户手动下载的截图文件由浏览器下载目录管理，不属于插件自动清理范围。
+- `options.captureScreenshot` 是可选 boolean，缺省为 `false`。只有显式为 `true` 且 `include` 包含 `visual` 时，插件才尝试用 `chrome.tabs.captureVisibleTab` 采集当前可见视口 JPEG data URL；失败时必须返回 limitation，不得伪造截图。bridge 接收 profile 后必须把截图 `dataUrl` 剥离为临时内存截图资产，不得把 base64 保存在可下载 Profile JSON 中；用户手动下载的截图文件由浏览器下载目录管理，不属于插件自动清理范围。
 - `options.targetMode` 只能是 `"reuse_or_new_tab"`、`"new_tab"` 或 `"active_tab"`；缺省为 `"reuse_or_new_tab"`。
 - `options.maxResourceUrls` 范围 `0..1000`，缺省 `300`。
 - 未定义的顶层字段或 `options` 字段必须返回 `400 INVALID_REQUEST`，不得忽略；未来协议扩展必须通过 `protocolVersion` 或显式 capability 协商。
@@ -201,7 +201,7 @@ Concurrency policy:
 - `EXTENSION_NOT_CONNECTED` 也覆盖浏览器打开到了错误 Chrome/Edge 用户 profile 的场景。bridge server 不得尝试枚举或判断用户本机浏览器 profile；Skill 文档和 E2E 报告必须提示：如果 StackPrism 安装在非默认浏览器或非默认用户 profile，Agent 必须用 `STACKPRISM_BROWSER_OPEN_COMMAND` 和 `STACKPRISM_BROWSER_OPEN_ARGS_JSON` 精确指定对应浏览器可执行文件和 profile 参数，否则只能从该错误、stderr 脱敏摘要和浏览器可见窗口判断。
 - 非终态 capture 的全局运行上限为 60 秒；超过后 bridge server 必须标记为 `failed`，错误码 `CAPTURE_TIMEOUT`，并让 control endpoint 返回 `cancel`，避免 Agent 永久轮询。
 - `cancel_requested` 超过 10 秒仍未收到插件确认时，bridge server 必须转为 `cancelled`，记录 `details.reason = "cancel_timeout"`，并让插件后续 late status 不得覆盖该终态。
-- `completed` profile 默认只在内存保留 10 分钟；超过 TTL 后 bridge server 必须把 capture 状态转为 `expired`，清除 profile body 和其中的 screenshot data URL，并让 `GET /v1/captures/{id}/profile` 返回 `410` 和错误码 `CAPTURE_RESULT_EXPIRED`，避免长期保留采集数据。bridge 进程退出也必须释放全部内存结果。
+- `completed` profile 默认只在内存保留 10 分钟；超过 TTL 后 bridge server 必须把 capture 状态转为 `expired`，清除 profile body 和临时 screenshot asset，并让 `GET /v1/captures/{id}/profile` 返回 `410` 和错误码 `CAPTURE_RESULT_EXPIRED`，避免长期保留采集数据。bridge 进程退出也必须释放全部内存结果。
 
 Target policy:
 
@@ -520,7 +520,7 @@ Viewport rule:
 - 普通 Chrome 扩展不能像 CDP 那样真实模拟移动设备、DPR、触控和 user agent。
 - 第一版 `viewports` 只表示“希望采集的窗口尺寸或当前视口摘要”，不是移动设备仿真。
 - 如果无法安全调整窗口尺寸，插件必须返回 `viewportMode = "current_viewport"` 并在 `limitations` 说明未做移动视口采集。
-- 默认不输出截图图像；`captureScreenshotMetadata` 仅表示采集视口尺寸、关键元素 bounding box 和 above-fold 摘要。`captureScreenshotMetadata = false` 时不得采集或输出 bounding box / above-fold 细节，只保留基础 viewport 上下文和 limitation。`captureScreenshot = true` 是单独显式能力，只输出当前可见视口 JPEG data URL，供支持图像输入的 Agent 可选使用；模型不支持图像输入时必须能忽略该字段。
+- 默认不输出截图图像；`captureScreenshotMetadata` 仅表示采集视口尺寸、关键元素 bounding box 和 above-fold 摘要。`captureScreenshotMetadata = false` 时不得采集或输出 bounding box / above-fold 细节，只保留基础 viewport 上下文和 limitation。`captureScreenshot = true` 是单独显式能力，扩展端只在传给本机 bridge 的内部 profile 中携带当前可见视口 JPEG data URL；bridge 保存后必须把它转为临时截图下载资产，下载给 Agent 的 Profile JSON 只包含 `downloadUrl` 和生命周期说明。
 - 如果需要调整窗口尺寸，必须记录原窗口尺寸并在采集后恢复；没有 `chrome.windows` 权限时不能假装已调整。
 - 第一版不新增 `chrome.windows` 权限；除非后续任务明确更新 manifest 和隐私文档，否则统一返回 `viewportMode = "current_viewport"`，不尝试调整窗口尺寸。
 
@@ -1274,7 +1274,7 @@ Manual bridge capture example:
 ```bash
 curl --max-time 60 -sS -X POST "${STACKPRISM_BRIDGE_BASE_URL}/v1/captures" \
   -H 'content-type: application/json' \
-  -H "authorization: Bearer ${STACKPRISM_BRIDGE_TOKEN}" \
+  -H "authorization: Bearer ${STACKPRISM_BRIDGE_API_TOKEN}" \
   -d '{"url":"http://127.0.0.1:<fixture-port>/site-experience-fixture.html","mode":"experience","waitMs":1000,"include":["tech","visual","layout","components","interaction","ux","assets"],"options":{"allowPrivateNetworkTarget":true,"captureScreenshotMetadata":false,"captureScreenshot":false}}'
 ```
 
