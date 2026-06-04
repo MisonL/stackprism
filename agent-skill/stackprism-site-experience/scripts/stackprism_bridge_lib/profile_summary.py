@@ -5,7 +5,7 @@ from .protocol import redact_url
 MAX_TEXT = 120
 MAX_ITEMS = 6
 TOKEN_TEXT = re.compile(r"\b(apiToken|bridgeToken|authorization|cookie|nonce|secret|token)\b\s*[:=]\s*(?:Bearer\s+)?[^\s,;]+", re.I)
-ID_TEXT = re.compile(r"\b(?:spbt?_|cap_|s_|n_|xfer_)[A-Za-z0-9_-]{8,}\b")
+ID_TEXT = re.compile(r"\b(?:spbt?_|cap_|s_|n_|xfer_|shot_)[A-Za-z0-9_-]{8,}\b")
 EMAIL_TEXT = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.I)
 PHONE_TEXT = re.compile(r"\b(?:\+?\d[\d -]{8,}\d)\b")
 URL_TEXT = re.compile(r"https?://[^\s\"')\]}]+")

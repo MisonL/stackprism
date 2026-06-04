@@ -46,11 +46,45 @@ export const uniquePush = (target: string[], value: unknown, limit = 80): void =
   if (clean && !target.includes(clean) && target.length < limit) target.push(clean)
 }
 
+const SENSITIVE_PATH_WORD_PATTERN = /^(?:token|secret|session|auth|authorization|signature|password|cookie|passcode)$/i
+const SENSITIVE_PATH_SHORT_TOKEN_PATTERN = /(?:^|[-_.])(?:key|pass)(?:$|[-_.])/i
+const SENSITIVE_PATH_COMPOUND_PATTERN =
+  /^(?:(?:api|access|private|public|secret|session|auth|token)[-_.]?(?:key|pass|token|secret|signature|code|id)|(?:key|pass|token)[-_.]?(?:token|secret|signature|code|id)|(?:reset|verify|access|auth|session|csrf|xsrf)[-_.]?(?:token|code|secret|key|signature))$/i
+const SENSITIVE_PATH_CAMEL_PATTERN = /^(?:apiKey|privateKey|publicKey|accessToken|refreshToken|sessionId|secretToken|authToken|csrfToken|xsrfToken)$/i
+const HIGH_ENTROPY_PATH_SEGMENT_PATTERN = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[A-Za-z0-9_-]{24,}$/
+const pathSegmentStem = (segment: string): string => segment.replace(/\.[A-Za-z0-9]{1,8}$/i, '')
+
+const isSensitivePathSegment = (segment: string): boolean => {
+  const stem = pathSegmentStem(segment)
+  return (
+    SENSITIVE_PATH_WORD_PATTERN.test(segment) ||
+    SENSITIVE_PATH_WORD_PATTERN.test(stem) ||
+    SENSITIVE_PATH_SHORT_TOKEN_PATTERN.test(segment) ||
+    SENSITIVE_PATH_SHORT_TOKEN_PATTERN.test(stem) ||
+    SENSITIVE_PATH_COMPOUND_PATTERN.test(segment) ||
+    SENSITIVE_PATH_COMPOUND_PATTERN.test(stem) ||
+    SENSITIVE_PATH_CAMEL_PATTERN.test(segment) ||
+    SENSITIVE_PATH_CAMEL_PATTERN.test(stem) ||
+    /^[0-9a-f]{16,}$/i.test(stem) ||
+    HIGH_ENTROPY_PATH_SEGMENT_PATTERN.test(stem) ||
+    segment.includes('=')
+  )
+}
+
+const redactPathname = (pathname: string): string =>
+  pathname
+    .split('/')
+    .map(segment => (segment && isSensitivePathSegment(segment) ? '[redacted]' : segment))
+    .join('/')
+
 export const safeUrl = (value: unknown): string => {
   try {
     const url = new URL(String(value || ''), location.href)
     if (!/^https?:$/i.test(url.protocol)) return ''
+    url.username = ''
+    url.password = ''
     url.hash = ''
+    url.pathname = redactPathname(url.pathname)
     for (const name of [...url.searchParams.keys()]) {
       url.searchParams.set(name, '[redacted]')
     }

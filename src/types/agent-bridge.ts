@@ -33,9 +33,12 @@ export const AGENT_BRIDGE_ERROR_CODES = [
   'STALE_STATUS_UPDATE',
   'PORT_IN_USE',
   'BRIDGE_INVALID_ENV',
+  'BRIDGE_START_FAILED',
   'BRIDGE_START_TIMEOUT',
   'BRIDGE_READY_PARSE_FAILED',
   'BRIDGE_PROTOCOL_UNSUPPORTED',
+  'BRIDGE_PAGE_RENDER_FAILED',
+  'BRIDGE_REQUEST_TIMEOUT',
   'BRIDGE_REQUEST_MISMATCH',
   'AGENT_BRIDGE_DISABLED',
   'CAPTURE_BUSY',
@@ -142,6 +145,24 @@ export interface AgentCaptureScreenshot {
   source: 'chrome.tabs.captureVisibleTab'
   scope: 'visible_viewport'
   capturedAt: string
+}
+
+export interface AgentProfileScreenshotReference {
+  downloadUrl: string
+  downloadMethod: 'GET' | 'file'
+  localPath?: string
+  mimeType: 'image/jpeg' | 'image/png' | 'image/webp'
+  byteLength: number
+  source: 'chrome.tabs.captureVisibleTab'
+  scope: 'visible_viewport'
+  capturedAt: string
+  lifecycle: {
+    requiresLocalBridge: boolean
+    availableUntil: string
+    note: string
+  }
+  profileJsonNote: string
+  note: string
 }
 
 export interface AgentCaptureRequest {

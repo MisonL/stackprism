@@ -1,5 +1,5 @@
 from .bridge_page_assets import BRIDGE_PAGE_SCRIPT, BRIDGE_PAGE_STYLE
-from .protocol import PROTOCOL_VERSION, html_escape_script_json, new_csp_nonce, redact_url
+from .protocol import ID_PATTERNS, PROTOCOL_VERSION, html_escape_script_json, new_csp_nonce, redact_url
 from .status import FINAL_STATES
 
 
@@ -37,10 +37,10 @@ BRIDGE_PAGE_HTML_TEMPLATE = """<!doctype html>
 <section class="target-panel" aria-label="目标与可复制结果">
 <div class="target-copy">
 <p class="preview-label">采集目标</p>
-<p id="targetUrl" class="target-url" title="">等待读取目标网址</p>
+<a id="targetUrl" class="target-url" title="" target="_blank" rel="noopener noreferrer" aria-disabled="true">等待读取目标网址</a>
 <p id="targetHelper" class="target-helper">采集完成后可复制给本机 Coding Agent 使用。</p>
 </div>
-<div class="target-actions"><button id="copyAllInfo" class="preview-button primary target-copy-button" type="button" disabled>复制全部信息</button></div>
+<div class="target-actions"><a id="openTargetUrl" class="preview-button target-open-link" target="_blank" rel="noopener noreferrer" aria-disabled="true" tabindex="-1">打开目标网页</a><button id="downloadProfile" class="preview-button profile-download-button" type="button" disabled>下载 Profile</button><button id="copyAllInfo" class="preview-button primary target-copy-button" type="button" disabled>复制全部信息</button></div>
 <p id="copyStatus" class="copy-status" role="status" aria-live="polite"></p>
 </section>
 <section class="result-grid" aria-label="采集结果">
@@ -64,9 +64,9 @@ BRIDGE_PAGE_HTML_TEMPLATE = """<!doctype html>
 <div class="preview-actions"><button id="copyScreenshot" class="preview-button" type="button" disabled>复制截图</button><button id="screenshotDownload" class="preview-button" type="button" disabled>下载截图</button></div>
 </section>
 </section>
-<section id="profileContentSection" class="content-section" hidden><div class="section-head"><div><h2>Agent 可读内容</h2><p>已转换为摘要；完整 raw profile 仍需 API token 读取。</p></div></div><div id="profileContentGrid" class="content-grid"></div></section>
+<section id="profileContentSection" class="content-section" hidden><div class="section-head"><div><h2>Agent 可读内容</h2><p>已转换为摘要；完整 Profile 可在本页完成后下载。</p></div></div><div id="profileContentGrid" class="content-grid"></div></section>
 <section class="flow-panel" aria-label="采集流程"><div class="flow-head"><h2>采集流程</h2><div class="flow-state"><p id="stepSummary" class="step-summary" role="status" aria-live="polite">当前步骤：扩展连接</p><button id="toggleSteps" class="flow-toggle" type="button" aria-controls="captureSteps" aria-expanded="false">展开步骤</button></div></div><ol id="captureSteps" class="steps" aria-label="采集步骤" role="list"><li class="step current" data-phase="bridge_connected" aria-current="step"><span class="step-index">1</span><div>扩展连接</div></li><li class="step" data-phase="request_loaded"><span class="step-index">2</span><div>读取请求</div></li><li class="step" data-phase="target_opening"><span class="step-index">3</span><div>打开目标</div></li><li class="step" data-phase="target_loaded"><span class="step-index">4</span><div>页面加载</div></li><li class="step" data-phase="detecting_tech"><span class="step-index">5</span><div>技术识别</div></li><li class="step" data-phase="profiling_experience"><span class="step-index">6</span><div>体验分析</div></li><li class="step" data-phase="posting_profile"><span class="step-index">7</span><div>回传 Profile</div></li><li class="step" data-phase="cleanup"><span class="step-index">8</span><div>清理完成</div></li></ol></section>
-<footer class="bridge-footer"><p class="bridge-note">本页只服务当前一次采集；raw profile 需 API token；摘要不含 token、nonce、raw JSON 或截图 data URL。</p><div class="pills"><span class="pill">127.0.0.1</span><span class="pill">当前 profile</span><span class="pill">只读采集</span></div></footer>
+<footer class="bridge-footer"><p class="bridge-note">本页只服务当前一次采集；完整 Profile 仅在本次结果未过期时下载；摘要不含 token、nonce、raw JSON 或截图 data URL。</p><div class="pills"><span class="pill">127.0.0.1</span><span class="pill">当前 profile</span><span class="pill">只读采集</span></div></footer>
 </div>
 </section>
 </main>
@@ -78,18 +78,20 @@ BRIDGE_PAGE_HTML_TEMPLATE = """<!doctype html>
 
 
 def render_bridge_page_html(csp_nonce, config):
-    return BRIDGE_PAGE_HTML_TEMPLATE.format(csp_nonce=csp_nonce, style=BRIDGE_PAGE_STYLE, config=config, script=BRIDGE_PAGE_SCRIPT)
+    if not ID_PATTERNS["cspNonce"].match(csp_nonce):
+        raise ValueError("INVALID_CSP_NONCE")
+    escaped_config = html_escape_script_json(config)
+    return BRIDGE_PAGE_HTML_TEMPLATE.format(csp_nonce=csp_nonce, style=BRIDGE_PAGE_STYLE, config=escaped_config, script=BRIDGE_PAGE_SCRIPT)
 
 
-def bridge_page_response(handler, capture):
+def bridge_page_response(capture):
     if capture["status"] == "expired":
         return "fail", 410, "CAPTURE_RESULT_EXPIRED", "Capture result expired.", None
     if capture["status"] in FINAL_STATES:
         error = capture.get("error") or {}
         return "fail", 409, error.get("code") or "INVALID_REQUEST", "Capture is already terminal.", {"status": capture["status"]}
     if capture["bridgeTokenRenderedAt"] or capture["bridgeTokenClaimedAt"]:
-        return "fail", 409, "INVALID_REQUEST", "Bridge token has already been rendered.", None
-    capture["bridgeTokenRenderedAt"] = handler.server.store.now()
+        return "fail", 409, "INVALID_REQUEST", "Bridge token has already been rendered or claimed.", None
     return "html", {
         "captureId": capture["id"],
         "sessionId": capture["sessionId"],
@@ -102,12 +104,26 @@ def bridge_page_response(handler, capture):
 
 def render_bridge_page(handler, capture):
     with handler.server.store._lock:
-        response = bridge_page_response(handler, capture)
+        response = bridge_page_response(capture)
     if response[0] == "fail":
         handler.fail(response[1], response[2], response[3], response[4])
         return
     csp_nonce = new_csp_nonce()
-    config = html_escape_script_json(response[1])
+    try:
+        html = render_bridge_page_html(csp_nonce, response[1])
+    except ValueError:
+        handler.fail(500, "BRIDGE_PAGE_RENDER_FAILED", "Bridge page render failed.")
+        return
+    with handler.server.store._lock:
+        response = bridge_page_response(capture)
+        if response[0] == "fail":
+            failed_response = response
+        else:
+            failed_response = None
+            capture["bridgeTokenRenderedAt"] = handler.server.store.now()
+    if failed_response:
+        handler.fail(failed_response[1], failed_response[2], failed_response[3], failed_response[4])
+        return
     handler.send_response(200)
     handler.send_header("Content-Type", "text/html; charset=utf-8")
     handler.send_header("Cache-Control", "no-store")
@@ -118,7 +134,7 @@ def render_bridge_page(handler, capture):
     handler.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
     handler.send_header(
         "Content-Security-Policy",
-        f"default-src 'none'; script-src 'nonce-{csp_nonce}'; style-src 'nonce-{csp_nonce}'; img-src data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+        f"default-src 'none'; script-src 'nonce-{csp_nonce}'; style-src 'nonce-{csp_nonce}'; img-src data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
     )
     handler.end_headers()
-    handler.wfile.write(render_bridge_page_html(csp_nonce, config).encode("utf-8"))
+    handler.wfile.write(html.encode("utf-8"))

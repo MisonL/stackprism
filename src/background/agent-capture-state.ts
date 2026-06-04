@@ -1,4 +1,5 @@
 import type { AgentBridgeError, AgentCapturePhase, AgentCaptureStatus } from '@/types/agent-bridge'
+import { logBackgroundError } from './logging'
 
 export const AGENT_CAPTURE_STATE_PREFIX = 'agent-capture:'
 export const AGENT_CAPTURE_INDEX_KEY = 'agent-capture:index'
@@ -153,13 +154,25 @@ export const saveAgentCaptureState = async (state: AgentCaptureState): Promise<v
   })
 }
 
+const restoreAgentCaptureIndexAfterRemoveFailure = async (ids: string[], captureId: string): Promise<void> => {
+  try {
+    await chrome.storage.session.set({ [AGENT_CAPTURE_INDEX_KEY]: [...new Set([...ids, captureId])] })
+  } catch (error) {
+    logBackgroundError('Agent capture state index rollback failed', { captureId, error })
+  }
+}
+
 export const removeAgentCaptureState = async (captureId: string): Promise<void> => {
   await withStateIndexMutation(async () => {
     const ids = (await listAgentCaptureIds()).filter(id => id !== captureId)
-    await Promise.all([
-      chrome.storage.session.set({ [AGENT_CAPTURE_INDEX_KEY]: ids }),
-      chrome.storage.session.remove(agentCaptureStateKey(captureId))
-    ])
+    const key = agentCaptureStateKey(captureId)
+    await chrome.storage.session.set({ [AGENT_CAPTURE_INDEX_KEY]: ids })
+    try {
+      await chrome.storage.session.remove(key)
+    } catch (error) {
+      await restoreAgentCaptureIndexAfterRemoveFailure(ids, captureId)
+      throw error
+    }
   })
 }
 

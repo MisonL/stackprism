@@ -100,9 +100,9 @@ def auth_capture(handler, capture, scope):
     if not token:
         handler.fail(401, "UNAUTHORIZED", "Bearer token is required.")
         return None
-    if scope in {"api", "status"} and safe_equal(token, handler.server.api_token):
+    if scope in {"api", "status", "download"} and safe_equal(token, handler.server.api_token):
         return "api"
-    if scope in {"bridge", "status"} and safe_equal(token, capture["bridgeToken"]):
+    if scope in {"bridge", "status", "download"} and safe_equal(token, capture["bridgeToken"]):
         return "bridge"
     handler.fail(403, "FORBIDDEN", "Token is not allowed for this endpoint.")
     return None

@@ -3,7 +3,7 @@ import { redactUrl } from './protocol.mjs'
 const MAX_TEXT = 120
 const MAX_ITEMS = 6
 const TOKEN_TEXT = /\b(apiToken|bridgeToken|authorization|cookie|nonce|secret|token)\b\s*[:=]\s*(?:Bearer\s+)?[^\s,;]+/gi
-const ID_TEXT = /\b(?:spbt?_|cap_|s_|n_|xfer_)[A-Za-z0-9_-]{8,}\b/g
+const ID_TEXT = /\b(?:spbt?_|cap_|s_|n_|xfer_|shot_)[A-Za-z0-9_-]{8,}\b/g
 const EMAIL_TEXT = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi
 const PHONE_TEXT = /\b(?:\+?\d[\d -]{8,}\d)\b/g
 const URL_TEXT = /https?:\/\/[^\s"')\]}]+/g

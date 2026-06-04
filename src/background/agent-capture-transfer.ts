@@ -83,8 +83,9 @@ export const registerAgentProfileTransferPort = (port: chrome.runtime.Port): voi
   let registeredKey = ''
   port.onMessage.addListener((message: AgentBridgeRuntimeMessage) => {
     if (message?.type === 'AGENT_PROFILE_TRANSFER_PORT_HELLO') {
-      registerPortHello(port, message)
-        .then(key => (registeredKey = key || registeredKey))
+      registerPortHello(port, message, key => {
+        registeredKey = key
+      })
         .catch(() => port.disconnect())
       return
     }
@@ -99,22 +100,27 @@ export const registerAgentProfileTransferPort = (port: chrome.runtime.Port): voi
   })
 }
 
-const registerPortHello = async (port: chrome.runtime.Port, message: AgentBridgeRuntimeMessage): Promise<string> => {
+const registerPortHello = async (
+  port: chrome.runtime.Port,
+  message: AgentBridgeRuntimeMessage,
+  registerKey: (key: string) => void
+): Promise<void> => {
   if (message.type !== 'AGENT_PROFILE_TRANSFER_PORT_HELLO' || message.protocolVersion !== bridgeProtocolVersion) {
     port.disconnect()
-    return ''
+    return
   }
   const validated = await validateRegisteredBridgeMessage(message, port.sender!)
   if (!validated.ok) {
     port.disconnect()
-    return ''
+    return
   }
   const key = captureKey(message.captureId, message.sessionId, message.nonce)
   const existing = profileTransferPorts.get(key)
   if (existing && existing.port !== port) {
     port.disconnect()
-    return ''
+    return
   }
+  registerKey(key)
   profileTransferPorts.set(key, {
     port,
     captureId: message.captureId,
@@ -123,7 +129,6 @@ const registerPortHello = async (port: chrome.runtime.Port, message: AgentBridge
     bridgeTabId: validated.session.tabId
   })
   notifyProfileTransferWaiters(key)
-  return key
 }
 
 const notifyProfileTransferWaiters = (key: string): void => {
@@ -135,7 +140,12 @@ const notifyProfileTransferWaiters = (key: string): void => {
 
 const resolvePendingAck = (registeredKey: string, message: AgentProfileTransferAckMessage): void => {
   if (captureKey(message.captureId, message.sessionId, message.nonce) !== registeredKey) return
-  const key = profileAckKey(message)
+  let key = ''
+  try {
+    key = profileAckKey(message)
+  } catch {
+    return
+  }
   const pending = pendingProfileAcks.get(key)
   if (!pending) return
   pendingProfileAcks.delete(key)

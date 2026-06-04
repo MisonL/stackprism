@@ -24,9 +24,12 @@ BRIDGE_ERROR_CODES = {
     "STALE_STATUS_UPDATE",
     "PORT_IN_USE",
     "BRIDGE_INVALID_ENV",
+    "BRIDGE_START_FAILED",
     "BRIDGE_START_TIMEOUT",
     "BRIDGE_READY_PARSE_FAILED",
     "BRIDGE_PROTOCOL_UNSUPPORTED",
+    "BRIDGE_PAGE_RENDER_FAILED",
+    "BRIDGE_REQUEST_TIMEOUT",
     "BRIDGE_REQUEST_MISMATCH",
     "AGENT_BRIDGE_DISABLED",
     "CAPTURE_BUSY",
@@ -61,8 +64,19 @@ BRIDGE_ERROR_CODES = {
 }
 
 SENSITIVE_DETAIL_KEY = re.compile(r"authorization|cookie|token|nonce|secret", re.I)
-ID_PATTERN = re.compile(r"\b(?:spbt?_|cap_|s_|n_|xfer_)[A-Za-z0-9_-]{8,}\b")
+ID_PATTERN = re.compile(r"\b(?:spbt?_|cap_|s_|n_|xfer_|shot_)[A-Za-z0-9_-]{8,}\b")
 URL_PATTERN = re.compile(r"https?://[^\s\"')\]}]+")
+SENSITIVE_PATH_WORD_PATTERN = re.compile(r"^(?:token|secret|session|auth|authorization|signature|password|cookie|passcode)$", re.I)
+SENSITIVE_PATH_SHORT_TOKEN_PATTERN = re.compile(r"(?:^|[-_.])(?:key|pass)(?:$|[-_.])", re.I)
+SENSITIVE_PATH_COMPOUND_PATTERN = re.compile(
+    r"^(?:(?:api|access|private|public|secret|session|auth)[-_.]?(?:key|pass|token|secret|signature|code|id)|(?:key|pass)[-_.]?(?:token|secret|signature|code|id)|(?:reset|verify|access|auth|session|csrf|xsrf)[-_.]?(?:token|code|secret|key|signature))$",
+    re.I,
+)
+SENSITIVE_PATH_CAMEL_PATTERN = re.compile(
+    r"^(?:apiKey|privateKey|publicKey|accessToken|refreshToken|sessionId|secretToken|authToken|csrfToken|xsrfToken)$",
+    re.I,
+)
+HIGH_ENTROPY_PATH_SEGMENT_PATTERN = re.compile(r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[A-Za-z0-9_-]{24,}$")
 MAX_ERROR_TEXT_LENGTH = 512
 MAX_ERROR_DETAIL_DEPTH = 4
 MAX_ERROR_DETAIL_KEYS = 50
@@ -74,6 +88,7 @@ ID_PATTERNS = {
     "captureId": re.compile(r"^cap_[A-Za-z0-9_-]{22}$"),
     "sessionId": re.compile(r"^s_[A-Za-z0-9_-]{22}$"),
     "nonce": re.compile(r"^n_[A-Za-z0-9_-]{22}$"),
+    "screenshotDownloadId": re.compile(r"^shot_[A-Za-z0-9_-]{43}$"),
     "profileTransferId": re.compile(r"^xfer_[A-Za-z0-9_-]{22}$"),
     "cspNonce": re.compile(r"^[A-Za-z0-9_-]{22}$"),
 }
@@ -101,6 +116,10 @@ def new_session_id():
 
 def new_nonce():
     return random_id("n_", 16)
+
+
+def new_screenshot_download_id():
+    return random_id("shot_", 32)
 
 
 def new_csp_nonce():
@@ -138,12 +157,33 @@ def html_escape_script_json(value):
     )
 
 
+def is_sensitive_path_segment(segment):
+    text = str(segment or "")
+    return (
+        bool(SENSITIVE_PATH_WORD_PATTERN.search(text))
+        or bool(SENSITIVE_PATH_SHORT_TOKEN_PATTERN.search(text))
+        or bool(SENSITIVE_PATH_COMPOUND_PATTERN.search(text))
+        or bool(SENSITIVE_PATH_CAMEL_PATTERN.search(text))
+        or bool(re.match(r"^[0-9a-f]{16,}$", text, re.I))
+        or bool(HIGH_ENTROPY_PATH_SEGMENT_PATTERN.match(text))
+        or "=" in text
+    )
+
+
+def redact_pathname(pathname):
+    return "/".join("[redacted]" if segment and is_sensitive_path_segment(segment) else segment for segment in str(pathname or "").split("/"))
+
+
 def redact_url(value):
     from urllib.parse import urlparse, urlunparse
 
     parsed = urlparse(str(value or ""))
+    host = parsed.hostname or ""
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    netloc = f"{host}:{parsed.port}" if parsed.port else host
     query = "[redacted]" if parsed.query else ""
-    return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, query, ""))
+    return urlunparse((parsed.scheme, netloc, redact_pathname(parsed.path), parsed.params, query, ""))
 
 
 def redact_error_text(value):

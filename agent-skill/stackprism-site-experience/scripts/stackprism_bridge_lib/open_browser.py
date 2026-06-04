@@ -2,6 +2,7 @@ import json
 import os
 import platform
 import subprocess
+from urllib.parse import urlparse
 
 
 DEFAULT_OPEN_TIMEOUT_SECONDS = 5
@@ -63,6 +64,9 @@ def open_browser(url, env=os.environ):
         return False, {"reason": code, "message": message}
     if any(char in url for char in ("\0", "\n", "\r")):
         return False, {"reason": "invalid_url"}
+    parsed_url = urlparse(url)
+    if parsed_url.scheme.lower() not in ("http", "https"):
+        return False, {"reason": "invalid_scheme", "allowed": ["http", "https"]}
     if env.get("STACKPRISM_BRIDGE_NO_OPEN") == "1":
         return True, {"skipped": True}
 

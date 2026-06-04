@@ -3,6 +3,8 @@ import { collectComponents, collectCssSignals, collectInteraction } from './expe
 import { collectBoundaries, collectAssets, collectUxSignals } from './experience-profiler-ux-assets'
 import { collectLayout, collectVisual } from './experience-profiler-visual-layout'
 
+const byteLengthOf = (value: unknown): number => new TextEncoder().encode(JSON.stringify(value)).byteLength
+
 const unavailableProfile = () => ({
   visual: {},
   layout: {},
@@ -16,13 +18,46 @@ const unavailableProfile = () => ({
 })
 
 const enforceResultLimit = (profile: any) => {
-  const bytes = new TextEncoder().encode(JSON.stringify(profile)).byteLength
-  if (bytes <= LIMITS.executeScriptResultBytes) return profile
-  profile.components.samples = profile.components.samples.slice(0, 10)
-  profile.ux.textSamples = profile.ux.textSamples.slice(0, 10)
-  profile.assets.urls = profile.assets.urls.slice(0, 50)
-  profile.evidence.truncation.executeScriptResult = bytes - LIMITS.executeScriptResultBytes
-  profile.limitations.push('execute_script_result_truncated')
+  const initialBytes = byteLengthOf(profile)
+  if (initialBytes <= LIMITS.executeScriptResultBytes) return profile
+  const markTruncated = () => {
+    if (!profile.limitations.includes('execute_script_result_truncated')) profile.limitations.push('execute_script_result_truncated')
+  }
+  const shrinkSteps = [
+    () => {
+      profile.components.samples = profile.components.samples.slice(0, 10)
+    },
+    () => {
+      profile.ux.textSamples = profile.ux.textSamples.slice(0, 10)
+    },
+    () => {
+      profile.assets.urls = profile.assets.urls.slice(0, 50)
+    },
+    () => {
+      profile.components.samples = profile.components.samples.slice(0, 3)
+      profile.ux.textSamples = profile.ux.textSamples.slice(0, 3)
+      profile.assets.urls = profile.assets.urls.slice(0, 10)
+    },
+    () => {
+      profile.visual = {}
+      profile.layout = {}
+    },
+    () => {
+      profile.components.samples = []
+      profile.ux.textSamples = []
+      profile.assets.urls = []
+    }
+  ]
+  for (const shrink of shrinkSteps) {
+    shrink()
+    markTruncated()
+    const bytes = byteLengthOf(profile)
+    if (bytes <= LIMITS.executeScriptResultBytes) {
+      profile.evidence.truncation.executeScriptResult = Math.max(0, initialBytes - bytes)
+      return profile
+    }
+  }
+  profile.evidence.truncation.executeScriptResult = Math.max(0, byteLengthOf(profile) - LIMITS.executeScriptResultBytes)
   return profile
 }
 

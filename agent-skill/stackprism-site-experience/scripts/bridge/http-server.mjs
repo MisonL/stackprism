@@ -6,7 +6,6 @@ import {
   commitProfile,
   finalStates,
   publicStatus,
-  readProfile,
   renderBridge,
   scopeForEndpoint,
   terminalProfileErrorCode,
@@ -25,37 +24,19 @@ import {
   newApiToken,
   profileSchema,
   protocolVersion,
+  safeEqual,
   sanitizeBridgeError,
   service,
   version
 } from './protocol.mjs'
-
-const DEFAULT_CREATE_LIMIT_PER_MINUTE = 10
-const DEFAULT_QUERY_LIMIT_PER_MINUTE = 120
-const DEFAULT_RESOURCE_POLICY = {
-  maxOpenConnections: 20,
-  headersTimeoutMs: 5000,
-  requestTimeoutMs: 35000,
-  keepAliveTimeoutMs: 2000
-}
-
-const makeRateLimiter = ({
-  createLimitPerMinute = DEFAULT_CREATE_LIMIT_PER_MINUTE,
-  queryLimitPerMinute = DEFAULT_QUERY_LIMIT_PER_MINUTE
-} = {}) => {
-  const buckets = new Map()
-  return (token, bucketName, limit, now = Date.now()) => {
-    const key = `${token}:${bucketName}`
-    const windowStart = now - (now % 60000)
-    const bucket = buckets.get(key)
-    if (!bucket || bucket.windowStart !== windowStart) {
-      buckets.set(key, { windowStart, count: 1 })
-      return true
-    }
-    bucket.count += 1
-    return bucket.count <= limit
-  }
-}
+import { readProfile, readProfileDownload, readScreenshotDownload } from './profile-response.mjs'
+import {
+  applyServerResourcePolicy,
+  DEFAULT_CREATE_LIMIT_PER_MINUTE,
+  DEFAULT_QUERY_LIMIT_PER_MINUTE,
+  DEFAULT_RESOURCE_POLICY,
+  makeRateLimiter
+} from './resource-policy.mjs'
 
 const isQueryEndpoint = (method, endpoint) => method === 'GET' && (endpoint === '' || endpoint === 'profile')
 const profileHeaders = { 'Referrer-Policy': 'no-referrer' }
@@ -79,13 +60,14 @@ const socketJsonError = (socket, statusLine, message) => {
 }
 
 const captureFromPath = (store, pathname) => {
-  const match = /^\/v1\/captures\/([^/]+)(?:\/(request|control|status|profile))?$/.exec(pathname)
+  const match =
+    /^\/v1\/captures\/([^/]+)(?:\/(request|control|status|profile|profile-download)|\/(screenshot-download)\/([^/]+))?$/.exec(pathname)
   if (!match || !isValidId('captureId', match[1])) return null
   const capture = store.get(match[1])
-  return capture ? { capture, endpoint: match[2] || '' } : { missing: true }
+  return capture ? { capture, endpoint: match[2] || match[3] || '', screenshotDownloadId: match[4] || '' } : { missing: true }
 }
 
-export const createBridgeServer = ({ port = 0, env = process.env, resolveHostname, now, rateLimits, resourcePolicy } = {}) => {
+export const createBridgeServer = ({ port = 0, env = process.env, resolveHostname, now, rateLimits, resourcePolicy, resultTtlMs } = {}) => {
   const openConfig = parseOpenConfig(env)
   if (!openConfig.ok) throw Object.assign(new Error(openConfig.message), { code: openConfig.code })
   const apiToken = newApiToken()
@@ -112,7 +94,7 @@ export const createBridgeServer = ({ port = 0, env = process.env, resolveHostnam
       if (!capture || capture.sessionId !== query.session || capture.nonce !== query.nonce) {
         return fail(res, 404, 'NOT_FOUND', 'Capture bridge page was not found.')
       }
-      return renderBridge(res, capture)
+      return renderBridge(res, capture, { store })
     }
     if (url.pathname === '/bridge') return methodNotAllowed(res, 'GET')
     if (req.method === 'POST' && url.pathname === '/v1/captures') {
@@ -141,10 +123,17 @@ export const createBridgeServer = ({ port = 0, env = process.env, resolveHostnam
     const routed = captureFromPath(store, url.pathname)
     if (!routed) return fail(res, 404, 'NOT_FOUND', 'Endpoint was not found.')
     if (routed.missing) return fail(res, 404, 'NOT_FOUND', 'Capture was not found.')
-    const { capture, endpoint } = routed
+    const { capture, endpoint, screenshotDownloadId } = routed
     const rejectedOrigin = rejectCrossOriginSensitiveRequest(req, res, baseUrl)
     if (rejectedOrigin) return rejectedOrigin
-    const allowed = auth(req, capture, apiToken, scopeForEndpoint(req.method, endpoint))
+    const publicScreenshotRead =
+      req.method === 'GET' &&
+      endpoint === 'screenshot-download' &&
+      isValidId('screenshotDownloadId', screenshotDownloadId) &&
+      safeEqual(screenshotDownloadId, capture.screenshotDownloadId)
+    const allowed = publicScreenshotRead
+      ? { ok: true, tokenType: 'screenshot' }
+      : auth(req, capture, apiToken, scopeForEndpoint(req.method, endpoint))
     if (!allowed.ok) return fail(res, allowed.status, allowed.code, allowed.message)
     if (
       allowed.tokenType === 'api' &&
@@ -173,7 +162,14 @@ export const createBridgeServer = ({ port = 0, env = process.env, resolveHostnam
       })
     }
     if (req.method === 'GET' && endpoint === 'profile') {
-      return readProfile(res, capture, allowed.tokenType, profileHeaders)
+      return readProfile(res, capture, allowed.tokenType, profileHeaders, { store })
+    }
+    if (req.method === 'GET' && endpoint === 'profile-download') {
+      return readProfileDownload(res, capture, profileHeaders, { store })
+    }
+    if (req.method === 'GET' && endpoint === 'screenshot-download') {
+      if (!publicScreenshotRead) return fail(res, 403, 'FORBIDDEN', 'Screenshot download URL is not valid for this capture.', {}, profileHeaders)
+      return readScreenshotDownload(res, capture, profileHeaders, { store })
     }
     if (req.method === 'POST' && endpoint === 'status') {
       const parsed = await readJson(req, 5 * 1024 * 1024, policy.requestTimeoutMs)
@@ -265,12 +261,9 @@ export const createBridgeServer = ({ port = 0, env = process.env, resolveHostnam
       if (!socket.destroyed) socket.setTimeout(policy.keepAliveTimeoutMs)
     })
   })
-  server.maxConnections = policy.maxOpenConnections
-  server.headersTimeout = policy.headersTimeoutMs
-  server.requestTimeout = policy.requestTimeoutMs
-  server.keepAliveTimeout = policy.keepAliveTimeoutMs
+  applyServerResourcePolicy(server, policy)
 
-  store = new CaptureStore({ baseUrl: '', openBrowser: url => openBrowser(url, env), now })
+  store = new CaptureStore({ baseUrl: '', openBrowser: url => openBrowser(url, env), now, resultTtlMs })
 
   const listen = () =>
     new Promise((resolve, reject) => {

@@ -11,14 +11,43 @@ const SENSITIVE_QUERY_RE = /(?:token|secret|session|auth|key|signature|password|
 const SENSITIVE_TEXT_PAIR_RE =
   /\b([A-Za-z0-9_-]*(?:token|secret|session|auth|authorization|key|signature|password|pass|cookie)[A-Za-z0-9_-]*)\s*[:=]\s*[^,\s;&]+/gi
 const EMBEDDED_HTTP_URL_RE = /\bhttps?:\/\/[^\s"'<>()[\]{}]+/gi
+const SENSITIVE_PATH_WORD_RE = /^(?:token|secret|session|auth|authorization|signature|password|cookie|passcode)$/i
+const SENSITIVE_PATH_SHORT_TOKEN_RE = /(?:^|[-_.])(?:key|pass)(?:$|[-_.])/i
+const SENSITIVE_PATH_COMPOUND_RE =
+  /^(?:(?:api|access|private|public|secret|session|auth|token)[-_.]?(?:key|pass|token|secret|signature|code|id)|(?:key|pass|token)[-_.]?(?:token|secret|signature|code|id)|(?:reset|verify|access|auth|session|csrf|xsrf)[-_.]?(?:token|code|secret|key|signature))$/i
+const SENSITIVE_PATH_CAMEL_RE = /^(?:apiKey|privateKey|publicKey|accessToken|refreshToken|sessionId|secretToken|authToken|csrfToken|xsrfToken)$/i
+const HIGH_ENTROPY_PATH_SEGMENT_RE = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[A-Za-z0-9_-]{24,}$/
+const pathSegmentStem = (segment: string): string => segment.replace(/\.[A-Za-z0-9]{1,8}$/i, '')
 
-export const isRecord = (value: unknown): value is Record<string, unknown> =>
-  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+export const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 
 export const cleanInlineText = (value: unknown): string =>
   String(value ?? '')
     .replace(/\s+/g, ' ')
     .trim()
+
+const isSensitivePathSegment = (segment: string): boolean => {
+  const stem = pathSegmentStem(segment)
+  return (
+    SENSITIVE_PATH_WORD_RE.test(segment) ||
+    SENSITIVE_PATH_WORD_RE.test(stem) ||
+    SENSITIVE_PATH_SHORT_TOKEN_RE.test(segment) ||
+    SENSITIVE_PATH_SHORT_TOKEN_RE.test(stem) ||
+    SENSITIVE_PATH_COMPOUND_RE.test(segment) ||
+    SENSITIVE_PATH_COMPOUND_RE.test(stem) ||
+    SENSITIVE_PATH_CAMEL_RE.test(segment) ||
+    SENSITIVE_PATH_CAMEL_RE.test(stem) ||
+    /^[0-9a-f]{16,}$/i.test(stem) ||
+    HIGH_ENTROPY_PATH_SEGMENT_RE.test(stem) ||
+    segment.includes('=')
+  )
+}
+
+export const redactUrlPathname = (pathname: string): string =>
+  String(pathname || '')
+    .split('/')
+    .map(segment => (segment && isSensitivePathSegment(segment) ? REDACTED : segment))
+    .join('/')
 
 const redactNormalizedUrl = (value: unknown): string => {
   const normalized = normalizeHttpUrl(value)
@@ -26,6 +55,9 @@ const redactNormalizedUrl = (value: unknown): string => {
   try {
     const url = new URL(normalized)
     url.hash = ''
+    url.username = ''
+    url.password = ''
+    url.pathname = redactUrlPathname(url.pathname)
     if (url.search) {
       const query = [...url.searchParams.entries()].map(([name]) => `${name}=${REDACTED}`).join('&')
       url.search = query ? `?${query}` : ''

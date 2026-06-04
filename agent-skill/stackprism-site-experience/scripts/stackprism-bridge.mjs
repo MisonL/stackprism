@@ -48,18 +48,17 @@ if (!openConfig.ok) {
       })}\n`
     )
   } catch (caught) {
-    const code = caught?.code === 'EADDRINUSE' ? 'PORT_IN_USE' : 'BRIDGE_INVALID_ENV'
-    if (code !== 'PORT_IN_USE') {
-      process.stderr.write(
-        `${JSON.stringify({
-          error: {
-            code: 'BRIDGE_START_FAILED',
-            message: 'Bridge server startup failed.',
-            details: { reason: caught?.code || caught?.name || 'unknown' }
-          }
-        })}\n`
-      )
-    }
-    failStart(code, code === 'PORT_IN_USE' ? 'Configured bridge port is already in use.' : 'Failed to start bridge server.')
+    const code = caught?.code === 'EADDRINUSE' ? 'PORT_IN_USE' : 'BRIDGE_START_FAILED'
+    const message = code === 'PORT_IN_USE' ? 'Configured bridge port is already in use.' : 'Failed to start bridge server.'
+    process.stderr.write(
+      `${JSON.stringify({
+        error: {
+          code,
+          message,
+          details: { reason: caught?.code || caught?.name || 'unknown' }
+        }
+      })}\n`
+    )
+    process.exit(1)
   }
 }

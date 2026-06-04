@@ -9,8 +9,10 @@ from .protocol import (
     VERSION,
     error_body,
     sanitize_bridge_error,
+    safe_equal,
     valid_id,
 )
+from .profile_response import get_profile, get_profile_download, get_screenshot_download
 from .security import bridge_query_value, valid_bridge_query
 from .status import FINAL_STATES, public_status, validate_status_update
 from .url_policy import normalize_capture_request, validate_final_url, validate_target_network_address
@@ -45,10 +47,10 @@ class BridgeHandler(BaseBridgeHandler):
                     self.server.active_connections = max(0, self.server.active_connections - 1)
 
     def capture_route(self, path):
-        match = re.match(r"^/v1/captures/([^/]+)(?:/(request|control|status|profile))?$", path)
+        match = re.match(r"^/v1/captures/([^/]+)(?:/(request|control|status|profile|profile-download)|/(screenshot-download)/([^/]+))?$", path)
         if not match or not valid_id("captureId", match[1]):
             return None
-        return self.server.store.get(match[1]), match[2] or ""
+        return self.server.store.get(match[1]), match[2] or match[3] or "", match[4] or ""
 
     def do_GET(self):
         if self.reject_bad_shell():
@@ -78,7 +80,7 @@ class BridgeHandler(BaseBridgeHandler):
             return
         self.handle_capture_get(*routed)
 
-    def handle_capture_get(self, capture, endpoint):
+    def handle_capture_get(self, capture, endpoint, screenshot_download_id=""):
         if not capture:
             self.fail(404, "NOT_FOUND", "Capture was not found.")
             return
@@ -108,25 +110,21 @@ class BridgeHandler(BaseBridgeHandler):
             self.send_json(200, {"id": capture["id"], "command": command, "status": capture["status"]})
             return
         if endpoint == "profile":
-            self.get_profile(capture)
+            get_profile(self, capture)
+            return
+        if endpoint == "profile-download":
+            get_profile_download(self, capture)
+            return
+        if endpoint == "screenshot-download":
+            public_screenshot_read = valid_id("screenshotDownloadId", screenshot_download_id) and safe_equal(screenshot_download_id, capture.get("screenshotDownloadId"))
+            if not public_screenshot_read:
+                if not self.auth_capture(capture, "download"):
+                    return
+                self.fail(403, "FORBIDDEN", "Screenshot download URL is not valid for this capture.", extra_headers={"Referrer-Policy": "no-referrer"})
+                return
+            get_screenshot_download(self, capture, require_auth=False)
             return
         self.method_not_allowed("GET, POST" if endpoint == "profile" else "GET")
-
-    def get_profile(self, capture):
-        token_type = self.auth_capture(capture, "status")
-        if not token_type:
-            return
-        profile_headers = {"Referrer-Policy": "no-referrer"}
-        if token_type == "api" and self.rate_limited(self.server.api_token, "query"):
-            self.fail(429, "RATE_LIMITED", "Agent bridge rate limit exceeded.", extra_headers=profile_headers)
-        elif token_type == "bridge":
-            self.fail(403, "BRIDGE_TOKEN_CANNOT_READ_PROFILE", "Bridge token cannot read profile.", extra_headers=profile_headers)
-        elif capture["status"] == "expired":
-            self.fail(410, "CAPTURE_RESULT_EXPIRED", "Capture result expired.", extra_headers=profile_headers)
-        elif capture["status"] != "completed":
-            self.fail(409, "INVALID_REQUEST", "Capture profile is not ready.", extra_headers=profile_headers)
-        else:
-            self.send_json(200, capture["profile"], profile_headers)
 
     def do_OPTIONS(self):
         if self.reject_bad_shell():
@@ -152,7 +150,7 @@ class BridgeHandler(BaseBridgeHandler):
         if not routed:
             self.fail(404, "NOT_FOUND", "Endpoint was not found.")
             return
-        capture, endpoint = routed
+        capture, endpoint, _screenshot_download_id = routed
         if not capture:
             self.fail(404, "NOT_FOUND", "Capture was not found.")
         elif endpoint == "profile":
@@ -279,7 +277,7 @@ class BridgeHandler(BaseBridgeHandler):
         if not routed:
             self.fail(404, "NOT_FOUND", "Endpoint was not found.")
             return
-        capture, endpoint = routed
+        capture, endpoint, _screenshot_download_id = routed
         if endpoint != "":
             self.method_not_allowed("GET")
             return

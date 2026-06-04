@@ -1,5 +1,5 @@
 const SENSITIVE_DETAIL_KEY = /authorization|cookie|token|nonce|secret/i
-const ID_PATTERN = /\b(?:spbt?_|cap_|s_|n_|xfer_)[A-Za-z0-9_-]{8,}\b/g
+const ID_PATTERN = /\b(?:spbt?_|cap_|s_|n_|xfer_|shot_)[A-Za-z0-9_-]{8,}\b/g
 const URL_PATTERN = /https?:\/\/[^\s"')]+/g
 const MAX_LOG_DETAIL_DEPTH = 4
 

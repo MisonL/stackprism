@@ -20,7 +20,7 @@ class BridgeServer(ThreadingHTTPServer):
     request_queue_size = DEFAULT_MAX_OPEN_CONNECTIONS
 
 
-def create_server(port=0, now=time.time, rate_limits=None, max_open_connections=DEFAULT_MAX_OPEN_CONNECTIONS, env=None):
+def create_server(port=0, now=time.time, rate_limits=None, max_open_connections=DEFAULT_MAX_OPEN_CONNECTIONS, env=None, result_ttl_seconds=None):
     active_env = os.environ if env is None else env
     open_config_ok, open_config_code, open_config_message = parse_open_config(active_env)
     if not open_config_ok:
@@ -37,7 +37,9 @@ def create_server(port=0, now=time.time, rate_limits=None, max_open_connections=
     server.active_connections = 0
     server.connection_lock = threading.Lock()
     server.api_token = api_token
-    server.store = CaptureStore(base_url, now, lambda url: open_browser(url, active_env))
+    ttl_seconds = result_ttl_seconds if result_ttl_seconds is not None else None
+    store_args = [base_url, now, lambda url: open_browser(url, active_env)]
+    server.store = CaptureStore(*store_args, result_ttl_seconds=ttl_seconds) if ttl_seconds is not None else CaptureStore(*store_args)
     server.rate_limits = {
         "create": (rate_limits or {}).get("createLimitPerMinute", DEFAULT_CREATE_LIMIT_PER_MINUTE),
         "query": (rate_limits or {}).get("queryLimitPerMinute", DEFAULT_QUERY_LIMIT_PER_MINUTE),

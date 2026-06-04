@@ -16,9 +16,9 @@ export const collectComponents = () => {
   const samples: Array<Record<string, unknown>> = []
   const counts: Record<string, number> = {}
   for (const [type, selector] of definitions) {
-    const matches = [...document.querySelectorAll(selector)].slice(0, 20)
+    const matches = [...document.querySelectorAll(selector)]
     counts[type] = matches.length
-    for (const element of matches) {
+    for (const element of matches.slice(0, 20)) {
       if (samples.length >= LIMITS.componentSamples) break
       samples.push({
         type,

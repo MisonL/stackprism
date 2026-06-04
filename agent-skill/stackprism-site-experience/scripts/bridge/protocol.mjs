@@ -21,9 +21,12 @@ const bridgeErrorCodes = new Set([
   'STALE_STATUS_UPDATE',
   'PORT_IN_USE',
   'BRIDGE_INVALID_ENV',
+  'BRIDGE_START_FAILED',
   'BRIDGE_START_TIMEOUT',
   'BRIDGE_READY_PARSE_FAILED',
   'BRIDGE_PROTOCOL_UNSUPPORTED',
+  'BRIDGE_PAGE_RENDER_FAILED',
+  'BRIDGE_REQUEST_TIMEOUT',
   'BRIDGE_REQUEST_MISMATCH',
   'AGENT_BRIDGE_DISABLED',
   'CAPTURE_BUSY',
@@ -58,8 +61,14 @@ const bridgeErrorCodes = new Set([
 ])
 
 const SENSITIVE_DETAIL_KEY = /authorization|cookie|token|nonce|secret/i
-const ID_PATTERN = /\b(?:spbt?_|cap_|s_|n_|xfer_)[A-Za-z0-9_-]{8,}\b/g
+const ID_PATTERN = /\b(?:spbt?_|cap_|s_|n_|xfer_|shot_)[A-Za-z0-9_-]{8,}\b/g
 const URL_PATTERN = /https?:\/\/[^\s"')\]}]+/g
+const SENSITIVE_PATH_WORD_PATTERN = /^(?:token|secret|session|auth|authorization|signature|password|cookie|passcode)$/i
+const SENSITIVE_PATH_SHORT_TOKEN_PATTERN = /(?:^|[-_.])(?:key|pass)(?:$|[-_.])/i
+const SENSITIVE_PATH_COMPOUND_PATTERN =
+  /^(?:(?:api|access|private|public|secret|session|auth)[-_.]?(?:key|pass|token|secret|signature|code|id)|(?:key|pass)[-_.]?(?:token|secret|signature|code|id)|(?:reset|verify|access|auth|session|csrf|xsrf)[-_.]?(?:token|code|secret|key|signature))$/i
+const SENSITIVE_PATH_CAMEL_PATTERN = /^(?:apiKey|privateKey|publicKey|accessToken|refreshToken|sessionId|secretToken|authToken|csrfToken|xsrfToken)$/i
+const HIGH_ENTROPY_PATH_SEGMENT_PATTERN = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[A-Za-z0-9_-]{24,}$/
 const MAX_ERROR_TEXT_LENGTH = 512
 const MAX_ERROR_DETAIL_DEPTH = 4
 const MAX_ERROR_DETAIL_KEYS = 50
@@ -71,18 +80,20 @@ export const identifierSpecs = {
   captureId: /^cap_[A-Za-z0-9_-]{22}$/,
   sessionId: /^s_[A-Za-z0-9_-]{22}$/,
   nonce: /^n_[A-Za-z0-9_-]{22}$/,
+  screenshotDownloadId: /^shot_[A-Za-z0-9_-]{43}$/,
   profileTransferId: /^xfer_[A-Za-z0-9_-]{22}$/,
   cspNonce: /^[A-Za-z0-9_-]{22}$/
 }
 
 export const makeId = prefix =>
-  `${prefix}${randomBytes(prefix === '' ? 16 : prefix === 'spb_' || prefix === 'spbt_' ? 32 : 16).toString('base64url')}`
+  `${prefix}${randomBytes(prefix === '' ? 16 : ['spb_', 'spbt_', 'shot_'].includes(prefix) ? 32 : 16).toString('base64url')}`
 
 export const newApiToken = () => makeId('spb_')
 export const newBridgeToken = () => makeId('spbt_')
 export const newCaptureId = () => makeId('cap_')
 export const newSessionId = () => makeId('s_')
 export const newNonce = () => makeId('n_')
+export const newScreenshotDownloadId = () => makeId('shot_')
 export const newCspNonce = () => makeId('')
 
 export const isValidId = (kind, value) => typeof value === 'string' && Boolean(identifierSpecs[kind]?.test(value))
@@ -124,10 +135,28 @@ export const htmlEscapeScriptJson = value =>
     .replaceAll('\u2028', '\\u2028')
     .replaceAll('\u2029', '\\u2029')
 
+const isSensitivePathSegment = segment =>
+  SENSITIVE_PATH_WORD_PATTERN.test(segment) ||
+  SENSITIVE_PATH_SHORT_TOKEN_PATTERN.test(segment) ||
+  SENSITIVE_PATH_COMPOUND_PATTERN.test(segment) ||
+  SENSITIVE_PATH_CAMEL_PATTERN.test(segment) ||
+  /^[0-9a-f]{16,}$/i.test(segment) ||
+  HIGH_ENTROPY_PATH_SEGMENT_PATTERN.test(segment) ||
+  segment.includes('=')
+
+const redactUrlPathname = pathname =>
+  String(pathname || '')
+    .split('/')
+    .map(segment => (segment && isSensitivePathSegment(segment) ? '[redacted]' : segment))
+    .join('/')
+
 export const redactUrl = value => {
   try {
     const url = new URL(String(value || ''))
     url.hash = ''
+    url.username = ''
+    url.password = ''
+    url.pathname = redactUrlPathname(url.pathname)
     if (url.search) url.search = '?[redacted]'
     return url.toString()
   } catch {

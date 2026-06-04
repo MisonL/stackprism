@@ -73,7 +73,7 @@ chrome.tabs.onRemoved.addListener(tabId => {
   clearDynamicSnapshotTimer(tabId)
   clearPendingDynamicSnapshot(tabId)
   clearAgentCaptureNetworkEvidence(tabId)
-  clearTabSession(tabId)
+  clearTabSession(tabId).catch(error => logBackgroundError('clearTabSession failed', { tabId, error }))
   clearBridgeSession(tabId).catch(error => logBackgroundError('clearBridgeSession failed', { tabId, error }))
 })
 
@@ -137,7 +137,7 @@ chrome.webNavigation.onCommitted.addListener(details => {
 })
 
 chrome.webNavigation.onErrorOccurred.addListener(details => {
-  handleAgentCaptureNavigationError(details.tabId, details.frameId).catch(error =>
+  handleAgentCaptureNavigationError(details.tabId, details.frameId, details.error).catch(error =>
     logBackgroundError('handleAgentCaptureNavigationError failed', {
       tabId: details.tabId,
       frameId: details.frameId,

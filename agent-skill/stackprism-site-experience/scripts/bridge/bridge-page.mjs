@@ -1,6 +1,12 @@
 import { bridgePageScript, bridgePageStyle } from './bridge-page-assets.mjs'
+import { htmlEscapeScriptJson, identifierSpecs } from './protocol.mjs'
 
-export const renderBridgePageHtml = (cspNonce, config) => `<!doctype html>
+export const renderBridgePageHtml = (cspNonce, config) => {
+  if (!identifierSpecs.cspNonce.test(cspNonce)) {
+    throw new Error('INVALID_CSP_NONCE')
+  }
+  const configJson = htmlEscapeScriptJson(config)
+  return `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -34,10 +40,10 @@ export const renderBridgePageHtml = (cspNonce, config) => `<!doctype html>
 <section class="target-panel" aria-label="目标与可复制结果">
 <div class="target-copy">
 <p class="preview-label">采集目标</p>
-<p id="targetUrl" class="target-url" title="">等待读取目标网址</p>
+<a id="targetUrl" class="target-url" title="" target="_blank" rel="noopener noreferrer" aria-disabled="true">等待读取目标网址</a>
 <p id="targetHelper" class="target-helper">采集完成后可复制给本机 Coding Agent 使用。</p>
 </div>
-<div class="target-actions"><button id="copyAllInfo" class="preview-button primary target-copy-button" type="button" disabled>复制全部信息</button></div>
+<div class="target-actions"><a id="openTargetUrl" class="preview-button target-open-link" target="_blank" rel="noopener noreferrer" aria-disabled="true" tabindex="-1">打开目标网页</a><button id="downloadProfile" class="preview-button profile-download-button" type="button" disabled>下载 Profile</button><button id="copyAllInfo" class="preview-button primary target-copy-button" type="button" disabled>复制全部信息</button></div>
 <p id="copyStatus" class="copy-status" role="status" aria-live="polite"></p>
 </section>
 <section class="result-grid" aria-label="采集结果">
@@ -61,14 +67,15 @@ export const renderBridgePageHtml = (cspNonce, config) => `<!doctype html>
 <div class="preview-actions"><button id="copyScreenshot" class="preview-button" type="button" disabled>复制截图</button><button id="screenshotDownload" class="preview-button" type="button" disabled>下载截图</button></div>
 </section>
 </section>
-<section id="profileContentSection" class="content-section" hidden><div class="section-head"><div><h2>Agent 可读内容</h2><p>已转换为摘要；完整 raw profile 仍需 API token 读取。</p></div></div><div id="profileContentGrid" class="content-grid"></div></section>
+<section id="profileContentSection" class="content-section" hidden><div class="section-head"><div><h2>Agent 可读内容</h2><p>已转换为摘要；完整 Profile 可在本页完成后下载。</p></div></div><div id="profileContentGrid" class="content-grid"></div></section>
 <section class="flow-panel" aria-label="采集流程"><div class="flow-head"><h2>采集流程</h2><div class="flow-state"><p id="stepSummary" class="step-summary" role="status" aria-live="polite">当前步骤：扩展连接</p><button id="toggleSteps" class="flow-toggle" type="button" aria-controls="captureSteps" aria-expanded="false">展开步骤</button></div></div><ol id="captureSteps" class="steps" aria-label="采集步骤" role="list"><li class="step current" data-phase="bridge_connected" aria-current="step"><span class="step-index">1</span><div>扩展连接</div></li><li class="step" data-phase="request_loaded"><span class="step-index">2</span><div>读取请求</div></li><li class="step" data-phase="target_opening"><span class="step-index">3</span><div>打开目标</div></li><li class="step" data-phase="target_loaded"><span class="step-index">4</span><div>页面加载</div></li><li class="step" data-phase="detecting_tech"><span class="step-index">5</span><div>技术识别</div></li><li class="step" data-phase="profiling_experience"><span class="step-index">6</span><div>体验分析</div></li><li class="step" data-phase="posting_profile"><span class="step-index">7</span><div>回传 Profile</div></li><li class="step" data-phase="cleanup"><span class="step-index">8</span><div>清理完成</div></li></ol></section>
-<footer class="bridge-footer"><p class="bridge-note">本页只服务当前一次采集；raw profile 需 API token；摘要不含 token、nonce、raw JSON 或截图 data URL。</p><div class="pills"><span class="pill">127.0.0.1</span><span class="pill">当前 profile</span><span class="pill">只读采集</span></div></footer>
+<footer class="bridge-footer"><p class="bridge-note">本页只服务当前一次采集；完整 Profile 仅在本次结果未过期时下载；摘要不含 token、nonce、raw JSON 或截图 data URL。</p><div class="pills"><span class="pill">127.0.0.1</span><span class="pill">当前 profile</span><span class="pill">只读采集</span></div></footer>
 </div>
 </section>
 </main>
 <section id="screenshotModal" class="screenshot-modal" data-open="false" aria-label="截图放大预览" role="dialog" aria-modal="true"><div class="modal-card"><div class="modal-bar"><p class="modal-title">截图预览</p><div class="modal-actions"><button id="modalCopyScreenshot" class="modal-close" type="button" disabled>复制截图</button><button id="modalDownload" class="modal-close" type="button" disabled>下载截图</button><button id="modalClose" class="modal-close" type="button">关闭</button></div></div><p id="modalCopyStatus" class="modal-copy-status" role="status" aria-live="polite"></p><img id="modalScreenshot" class="modal-image" alt=""></div></section>
-<script id="stackprism-agent-bridge-config" type="application/json" nonce="${cspNonce}">${config}</script>
+<script id="stackprism-agent-bridge-config" type="application/json" nonce="${cspNonce}">${configJson}</script>
 <script nonce="${cspNonce}">${bridgePageScript}</script>
 </body>
 </html>`
+}

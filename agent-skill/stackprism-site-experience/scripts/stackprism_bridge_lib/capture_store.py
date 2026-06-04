@@ -2,7 +2,8 @@ import threading
 import time
 
 from .open_browser import open_browser
-from .protocol import error_body, new_bridge_token, new_capture_id, new_nonce, new_session_id
+from .protocol import error_body, new_bridge_token, new_capture_id, new_nonce, new_screenshot_download_id, new_session_id
+from .profile_response import prepare_profile_for_storage
 
 
 EXTENSION_CONNECT_TIMEOUT_SECONDS = 30
@@ -60,6 +61,7 @@ class CaptureStore:
                 "sequence": 0,
                 "request": request,
                 "profile": None,
+                "screenshotAsset": None,
                 "error": None,
                 "createdAt": now,
                 "extensionDeadlineAt": now + EXTENSION_CONNECT_TIMEOUT_SECONDS,
@@ -68,9 +70,13 @@ class CaptureStore:
                 "resultExpiresAt": None,
                 "bridgeTokenRenderedAt": None,
                 "bridgeTokenClaimedAt": None,
+                "profileDownloadReadyAt": None,
+                "screenshotDownloadId": new_screenshot_download_id(),
+                "screenshotUrl": None,
             }
             capture["bridgeUrl"] = f"{self.base_url}/bridge?session={session_id}&capture={capture_id}&nonce={nonce}"
             capture["profileUrl"] = f"{self.base_url}/v1/captures/{capture_id}/profile"
+            capture["screenshotUrl"] = f"{self.base_url}/v1/captures/{capture_id}/screenshot-download/{capture['screenshotDownloadId']}"
             self.captures[capture_id] = capture
             self.prune_terminal_records()
         opened, details = self.open_browser(capture["bridgeUrl"])
@@ -88,9 +94,18 @@ class CaptureStore:
 
     def mark_profile(self, capture, profile):
         with self._lock:
-            capture["profile"] = profile
+            capture["resultExpiresAt"] = self.now() + self.result_ttl_seconds
+            stored_profile, screenshot_asset = prepare_profile_for_storage(profile, capture)
+            capture["profile"] = stored_profile
+            capture["screenshotAsset"] = screenshot_asset
             capture["status"] = "completed"
             capture["phase"] = "cleanup"
+            self.schedule_result_expiry(capture)
+
+    def touch_result(self, capture):
+        with self._lock:
+            if capture.get("status") != "completed":
+                return
             capture["resultExpiresAt"] = self.now() + self.result_ttl_seconds
             self.schedule_result_expiry(capture)
 
@@ -123,6 +138,7 @@ class CaptureStore:
             if capture["status"] == "completed" and capture.get("resultExpiresAt") and capture["resultExpiresAt"] <= now:
                 capture["status"] = "expired"
                 capture["profile"] = None
+                capture["screenshotAsset"] = None
                 capture["error"] = error_body("CAPTURE_RESULT_EXPIRED", "Capture result expired.")["error"]
                 self.clear_result_expiry_timer(capture["id"])
             extension_deadline = capture.get("extensionDeadlineAt")

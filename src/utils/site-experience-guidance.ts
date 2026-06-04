@@ -48,10 +48,22 @@ const valueCount = (value: unknown): number => (Array.isArray(value) ? value.len
 const GEOMETRY_METADATA_KEYS = new Set(['rect', 'boundingbox', 'bounds'])
 const screenshotSummary = (value: unknown) => {
   const screenshot = isPlainRecord(value) ? value : {}
+  const hasDataUrl = typeof screenshot.dataUrl === 'string' && /^data:image\/jpeg;base64,/i.test(screenshot.dataUrl)
+  const hasDownloadUrl = typeof screenshot.downloadUrl === 'string'
   return {
-    screenshotIncluded: typeof screenshot.dataUrl === 'string' && /^data:image\/jpeg;base64,/i.test(screenshot.dataUrl),
+    screenshotIncluded: hasDataUrl || hasDownloadUrl,
+    screenshotBase64Included: hasDataUrl,
+    screenshotDownloadUrl: cleanGuidanceText(screenshot.downloadUrl),
+    screenshotLocalPath: cleanGuidanceText(screenshot.localPath),
+    screenshotDownloadHint:
+      hasDataUrl || hasDownloadUrl
+        ? 'To inspect actual visual appearance, download or open the screenshot image from visualProfile.screenshot.downloadUrl. The Profile JSON intentionally omits screenshot base64.'
+        : 'No screenshot image is available in this capture. Review limitations before treating visual evidence as absent.',
+    screenshotProfileJsonNote:
+      'Profile JSON is standard JSON and cannot contain comments. Read this field as the instruction note for screenshot handling.',
     screenshotScope: cleanGuidanceText(screenshot.scope),
-    screenshotMimeType: cleanGuidanceText(screenshot.mimeType)
+    screenshotMimeType: cleanGuidanceText(screenshot.mimeType),
+    screenshotByteLength: Number.isFinite(Number(screenshot.byteLength)) ? Number(screenshot.byteLength) : 0
   }
 }
 

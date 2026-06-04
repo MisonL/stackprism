@@ -1,6 +1,7 @@
-import { fail, htmlEscapeScriptJson, isKnownBridgeErrorCode, json, newCspNonce, protocolVersion, redactUrl, safeEqual } from './protocol.mjs'
+import { fail, isKnownBridgeErrorCode, json, newCspNonce, protocolVersion, redactUrl, safeEqual } from './protocol.mjs'
 import { renderBridgePageHtml } from './bridge-page.mjs'
 import { profilePreviewSummary } from './profile-summary.mjs'
+import { screenshotPreviewForCapture } from './profile-response.mjs'
 
 export const finalStates = new Set(['completed', 'failed', 'cancelled', 'expired'])
 
@@ -16,7 +17,15 @@ const statusPhases = [
   'cleanup'
 ]
 const phaseOrder = new Map(statusPhases.map((phase, index) => [phase, index]))
-const endpointMethods = { '': 'GET, DELETE', request: 'GET', control: 'GET', status: 'POST', profile: 'GET, POST' }
+const endpointMethods = {
+  '': 'GET, DELETE',
+  request: 'GET',
+  control: 'GET',
+  status: 'POST',
+  profile: 'GET, POST',
+  'profile-download': 'GET',
+  'screenshot-download': 'GET'
+}
 
 const tokenFrom = req => /^Bearer (.+)$/.exec(req.headers.authorization || '')?.[1] || ''
 
@@ -25,8 +34,8 @@ export const allowForCaptureEndpoint = endpoint => endpointMethods[endpoint] || 
 export const auth = (req, capture, apiToken, scope) => {
   const token = tokenFrom(req)
   if (!token) return { ok: false, status: 401, code: 'UNAUTHORIZED', message: 'Bearer token is required.' }
-  if (scope === 'api' && safeEqual(token, apiToken)) return { ok: true, tokenType: 'api' }
-  if (scope === 'bridge' && capture && safeEqual(token, capture.bridgeToken)) return { ok: true, tokenType: 'bridge' }
+  if (['api', 'download'].includes(scope) && safeEqual(token, apiToken)) return { ok: true, tokenType: 'api' }
+  if (['bridge', 'download'].includes(scope) && capture && safeEqual(token, capture.bridgeToken)) return { ok: true, tokenType: 'bridge' }
   if (scope === 'status' && (safeEqual(token, apiToken) || (capture && safeEqual(token, capture.bridgeToken)))) {
     return { ok: true, tokenType: safeEqual(token, apiToken) ? 'api' : 'bridge' }
   }
@@ -36,30 +45,15 @@ export const auth = (req, capture, apiToken, scope) => {
 export const scopeForEndpoint = (method, endpoint) => {
   if (endpoint === '' && method === 'GET') return 'status'
   if (endpoint === 'request' || endpoint === 'control' || (method === 'POST' && ['status', 'profile'].includes(endpoint))) return 'bridge'
+  if (method === 'GET' && ['profile-download', 'screenshot-download'].includes(endpoint)) return 'download'
   return method === 'GET' && endpoint === 'profile' ? 'status' : 'api'
-}
-
-const screenshotDataUrlPattern = /^data:image\/(jpeg|png|webp);base64,/
-
-const screenshotPreview = capture => {
-  const screenshot = capture.profile?.visualProfile?.screenshot
-  const match = typeof screenshot?.dataUrl === 'string' ? screenshot.dataUrl.match(screenshotDataUrlPattern) : null
-  if (!match) {
-    return null
-  }
-  return {
-    dataUrl: screenshot.dataUrl,
-    mimeType: `image/${match[1]}`,
-    byteLength: screenshot.byteLength,
-    scope: screenshot.scope
-  }
 }
 
 const previewForCapture = capture => {
   const targetUrl = redactUrl(capture.finalUrl || capture.request?.url)
   const preview = {}
   if (targetUrl) preview.targetUrl = targetUrl
-  const screenshot = capture.status === 'completed' ? screenshotPreview(capture) : null
+  const screenshot = capture.status === 'completed' ? screenshotPreviewForCapture(capture) : null
   if (screenshot) preview.screenshot = screenshot
   const summary = profilePreviewSummary(capture, screenshot)
   if (summary) Object.assign(preview, summary)
@@ -70,6 +64,7 @@ export const publicStatus = capture => {
   const status = { id: capture.id, status: capture.status }
   if (capture.phase) status.phase = capture.phase
   if (capture.error) status.error = capture.error
+  if (capture.profileDownloadReadyAt) status.profileDownloadReady = true
   const preview = previewForCapture(capture)
   if (preview) status.preview = preview
   return status
@@ -93,14 +88,6 @@ export const writeProfile = (res, result) =>
   result.ok
     ? json(res, result.status, result.body)
     : fail(res, result.status, result.code, result.message || 'Capture is already terminal.', result.details)
-
-export const readProfile = (res, capture, tokenType, headers) => {
-  if (tokenType === 'bridge') return fail(res, 403, 'BRIDGE_TOKEN_CANNOT_READ_PROFILE', 'Bridge token cannot read profile.', {}, headers)
-  if (capture.status === 'expired') return fail(res, 410, 'CAPTURE_RESULT_EXPIRED', 'Capture result expired.', {}, headers)
-  if (capture.status !== 'completed')
-    return fail(res, 409, 'INVALID_REQUEST', 'Capture profile is not ready.', { status: capture.status }, headers)
-  return json(res, 200, capture.profile, headers)
-}
 
 export const validateStatusUpdate = (capture, body) => {
   if (finalStates.has(capture.status)) {
@@ -146,27 +133,54 @@ export const validateStatusUpdate = (capture, body) => {
   return { ok: true }
 }
 
-export const renderBridge = (res, capture) => {
-  if (capture.status === 'expired') {
-    return fail(res, 410, 'CAPTURE_RESULT_EXPIRED', 'Capture result expired.')
-  }
+const bridgePageState = capture => {
+  if (capture.status === 'expired') return { kind: 'fail', args: [410, 'CAPTURE_RESULT_EXPIRED', 'Capture result expired.'] }
   if (finalStates.has(capture.status)) {
-    return fail(res, 409, capture.error?.code || 'INVALID_REQUEST', 'Capture is already terminal.', {
-      status: capture.status
-    })
+    return {
+      kind: 'fail',
+      args: [409, capture.error?.code || 'INVALID_REQUEST', 'Capture is already terminal.', { status: capture.status }]
+    }
   }
-  if (capture.bridgeTokenRenderedAt || capture.bridgeTokenClaimedAt)
-    return fail(res, 409, 'INVALID_REQUEST', 'Bridge token has already been used.')
-  capture.bridgeTokenRenderedAt = Date.now()
+  if (capture.bridgeTokenRenderedAt || capture.bridgeTokenClaimedAt) {
+    return {
+      kind: 'fail',
+      args: [409, 'INVALID_REQUEST', 'Bridge token has already been rendered or claimed.']
+    }
+  }
+  return {
+    kind: 'config',
+    config: {
+      captureId: capture.id,
+      sessionId: capture.sessionId,
+      nonce: capture.nonce,
+      bridgeToken: capture.bridgeToken,
+      targetUrl: redactUrl(capture.request?.url),
+      protocolVersion
+    }
+  }
+}
+
+const buildBridgePage = (capture, now = Date.now) => {
+  const state = bridgePageState(capture)
+  if (state.kind === 'fail') return state
   const cspNonce = newCspNonce()
-  const config = htmlEscapeScriptJson({
-    captureId: capture.id,
-    sessionId: capture.sessionId,
-    nonce: capture.nonce,
-    bridgeToken: capture.bridgeToken,
-    targetUrl: redactUrl(capture.request?.url),
-    protocolVersion
-  })
+  try {
+    const html = renderBridgePageHtml(cspNonce, state.config)
+    capture.bridgeTokenRenderedAt = now()
+    return { kind: 'html', cspNonce, html }
+  } catch {
+    return { kind: 'fail', args: [500, 'BRIDGE_PAGE_RENDER_FAILED', 'Bridge page render failed.'] }
+  }
+}
+
+export const renderBridge = async (res, capture, { store } = {}) => {
+  const page = store?.withCaptureLock
+    ? await store.withCaptureLock(capture.id, async () => {
+        const lockedCapture = store.get(capture.id)
+        return lockedCapture ? buildBridgePage(lockedCapture, store.now) : { kind: 'fail', args: [404, 'NOT_FOUND', 'Capture not found.'] }
+      })
+    : buildBridgePage(capture)
+  if (page.kind === 'fail') return fail(res, ...page.args)
   res.writeHead(200, {
     'Content-Type': 'text/html; charset=utf-8',
     'Cache-Control': 'no-store',
@@ -175,7 +189,7 @@ export const renderBridge = (res, capture) => {
     'X-Frame-Options': 'DENY',
     'Cross-Origin-Opener-Policy': 'same-origin',
     'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
-    'Content-Security-Policy': `default-src 'none'; script-src 'nonce-${cspNonce}'; style-src 'nonce-${cspNonce}'; img-src data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`
+    'Content-Security-Policy': `default-src 'none'; script-src 'nonce-${page.cspNonce}'; style-src 'nonce-${page.cspNonce}'; img-src data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`
   })
-  res.end(renderBridgePageHtml(cspNonce, config))
+  res.end(page.html)
 }

@@ -87,7 +87,7 @@ const isValidBeginMetadata = (message: AgentBridgeRuntimeMessage): boolean =>
   message.type === 'AGENT_PROFILE_TRANSFER_BEGIN' &&
   Number.isInteger(message.chunkCount) &&
   Number.isInteger(message.byteLength) &&
-  message.byteLength >= 0 &&
+  message.byteLength > 0 &&
   message.byteLength <= PROFILE_BODY_BYTES &&
   message.chunkCount === expectedChunkCount(message.byteLength) &&
   SHA256_HEX_PATTERN.test(message.sha256) &&

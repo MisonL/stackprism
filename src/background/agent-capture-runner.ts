@@ -39,6 +39,7 @@ const waitForRequestDelay = async (waitMs: number): Promise<void> => {
 const loadTargetTab = async (state: AgentCaptureState, request: AgentCaptureRequest): Promise<chrome.tabs.Tab> => {
   if (!state.targetTabId) throw new Error('TARGET_TAB_CLOSED')
   if (!request.options.forceRefresh) return waitForTargetTabLoaded(state.targetTabId, state.deadlineAt)
+  if (state.createdByCapture) await waitForTargetTabLoaded(state.targetTabId, state.deadlineAt)
   state.targetNetwork = undefined
   state.targetNetworkObservedAfter = Date.now()
   state.updatedAt = state.targetNetworkObservedAfter

@@ -41,8 +41,10 @@ export const profileAckKey = (message: {
   nonce: string
   profileTransferId: string
   chunkIndex?: number
-}): string =>
-  `${captureKey(message.captureId, message.sessionId, message.nonce)}:${message.profileTransferId}:${message.chunkIndex ?? 'meta'}`
+}): string => {
+  if (message.profileTransferId.includes(':')) throw new Error('INVALID_REQUEST')
+  return `${captureKey(message.captureId, message.sessionId, message.nonce)}:${message.profileTransferId}:${message.chunkIndex ?? 'meta'}`
+}
 
 export const mapCaughtErrorCode = (caught: unknown, fallback: AgentBridgeError['code']): AgentBridgeError['code'] => {
   const message = caught instanceof Error ? caught.message : String(caught || '')

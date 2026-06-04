@@ -82,7 +82,7 @@ export const rejectCrossOriginSensitiveRequest = (req, res, baseUrl) => {
   const { referer } = req.headers
   if (referer) {
     try {
-      if (new URL(referer).origin !== baseUrl) {
+      if (new URL(referer).origin !== allowedOrigin) {
         fail(res, 403, 'ORIGIN_NOT_ALLOWED', 'Referer is not allowed.')
         return true
       }

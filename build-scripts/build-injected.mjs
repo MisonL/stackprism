@@ -17,6 +17,7 @@ for (const entry of entries) {
   const result = spawnSync('pnpm', ['exec', 'vite', 'build', '--config', 'vite.injected.config.ts'], {
     cwd: root,
     stdio: 'inherit',
+    shell: process.platform === 'win32',
     env: { ...process.env, INJECTED_ENTRY: entry }
   })
   if (result.status !== 0) {

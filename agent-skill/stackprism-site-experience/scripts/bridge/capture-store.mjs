@@ -1,4 +1,5 @@
-import { newBridgeToken, newCaptureId, newNonce, newSessionId } from './protocol.mjs'
+import { newBridgeToken, newCaptureId, newNonce, newScreenshotDownloadId, newSessionId } from './protocol.mjs'
+import { prepareProfileForStorage } from './profile-response.mjs'
 
 const CAPTURE_TIMEOUT_MS = 95000
 const EXTENSION_CONNECT_TIMEOUT_MS = 30000
@@ -69,6 +70,7 @@ export class CaptureStore {
       sequence: 0,
       request,
       profile: null,
+      screenshotAsset: null,
       error: null,
       createdAt: this.now(),
       extensionDeadlineAt: this.now() + EXTENSION_CONNECT_TIMEOUT_MS,
@@ -76,10 +78,14 @@ export class CaptureStore {
       cancelDeadlineAt: null,
       resultExpiresAt: null,
       bridgeTokenRenderedAt: null,
-      bridgeTokenClaimedAt: null
+      bridgeTokenClaimedAt: null,
+      profileDownloadReadyAt: null,
+      screenshotDownloadId: newScreenshotDownloadId(),
+      screenshotUrl: null
     }
     capture.bridgeUrl = `${this.baseUrl}/bridge?session=${capture.sessionId}&capture=${capture.id}&nonce=${capture.nonce}`
     capture.profileUrl = `${this.baseUrl}/v1/captures/${capture.id}/profile`
+    capture.screenshotUrl = `${this.baseUrl}/v1/captures/${capture.id}/screenshot-download/${capture.screenshotDownloadId}`
     this.captures.set(capture.id, capture)
     this.pruneTerminalRecords()
     const opened = this.openBrowser(capture.bridgeUrl)
@@ -115,6 +121,7 @@ export class CaptureStore {
     if (capture.status === 'completed' && capture.resultExpiresAt && capture.resultExpiresAt <= now) {
       capture.status = 'expired'
       capture.profile = null
+      capture.screenshotAsset = null
       capture.error = { code: 'CAPTURE_RESULT_EXPIRED', message: 'Capture result expired.' }
       this.clearResultExpiryTimer(capture.id)
     }
@@ -155,9 +162,17 @@ export class CaptureStore {
   }
 
   markProfile(capture, profile) {
+    capture.resultExpiresAt = this.now() + this.resultTtlMs
+    const prepared = prepareProfileForStorage(profile, capture)
     capture.status = 'completed'
     capture.phase = 'cleanup'
-    capture.profile = profile
+    capture.profile = prepared.profile
+    capture.screenshotAsset = prepared.screenshotAsset
+    this.scheduleResultExpiry(capture)
+  }
+
+  touchResult(capture) {
+    if (capture.status !== 'completed') return
     capture.resultExpiresAt = this.now() + this.resultTtlMs
     this.scheduleResultExpiry(capture)
   }

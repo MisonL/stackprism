@@ -37,7 +37,7 @@ def main():
     except OSError as exc:
         if getattr(exc, "errno", None) == errno.EADDRINUSE:
             return fail_start("PORT_IN_USE", "Configured bridge port is already in use.")
-        return fail_start("BRIDGE_INVALID_ENV", "Failed to start bridge server.")
+        return fail_start("BRIDGE_START_FAILED", "Failed to start bridge server.")
 
     def shutdown(_signum=None, _frame=None):
         server.shutdown()

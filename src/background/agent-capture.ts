@@ -37,6 +37,17 @@ let startCaptureMutation: Promise<void> = Promise.resolve()
 
 type PreparedAgentCapture = { ok: true; state: AgentCaptureState; request: AgentCaptureRequest } | { ok: false; error: AgentBridgeError }
 
+const NAVIGATION_ERROR_REASON_PATTERN = /^net::[A-Z0-9_]+$/
+const NAVIGATION_ABORTED_ERROR = 'net::ERR_ABORTED'
+
+const navigationErrorDetails = (error?: string): Record<string, unknown> => {
+  const reason = String(error || '').trim()
+  if (!reason) return {}
+  return { reason: NAVIGATION_ERROR_REASON_PATTERN.test(reason) ? reason : 'navigation_error' }
+}
+
+const isSupersededNavigationError = (error?: string): boolean => String(error || '').trim() === NAVIGATION_ABORTED_ERROR
+
 const withStartCaptureLock = async <T>(work: () => Promise<T>): Promise<T> => {
   const previous = startCaptureMutation
   let release!: () => void
@@ -102,12 +113,14 @@ export const handleAgentCaptureTabNavigation = async (tabId: number, nextUrl: un
   }
 }
 
-export const handleAgentCaptureNavigationError = async (tabId: number, frameId: number): Promise<void> => {
+export const handleAgentCaptureNavigationError = async (tabId: number, frameId: number, error?: string): Promise<void> => {
   await reconcileAndCleanupAgentCaptures()
   if (frameId !== 0) return
+  if (isSupersededNavigationError(error)) return
+  const details = navigationErrorDetails(error)
   for (const state of await loadActiveAgentCaptureStates()) {
     if (state.targetTabId === tabId) {
-      await failAgentCapture(state, 'TARGET_LOAD_FAILED', 'Agent target tab main frame failed to load.')
+      await failAgentCapture(state, 'TARGET_LOAD_FAILED', 'Agent target tab main frame failed to load.', details)
     }
   }
 }

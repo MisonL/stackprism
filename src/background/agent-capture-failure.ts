@@ -37,8 +37,8 @@ export const failAgentCaptureWithPoster = async (
   state.status = 'failed'
   state.error = failure
   state.updatedAt = Date.now()
-  await saveAgentCaptureState(state)
   try {
+    await saveAgentCaptureState(state).catch(caught => reportCleanupFailure('saveAgentCaptureState', caught))
     try {
       clearProfileTransferPort(state)
     } catch (caught) {
