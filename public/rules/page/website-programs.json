@@ -303,7 +303,17 @@
           },
           {
             "name": "MkDocs",
-            "patterns": ["mkdocs", "mkdocs_page_name", "material for mkdocs"]
+            "patterns": [
+              "mkdocs",
+              "mkdocs_page_name",
+              "material for mkdocs",
+              "<meta[^>]+name=[\"']?generator[\"']?[^>]+content=[\"'][^\"']*mkdocs"
+            ]
+          },
+          {
+            "name": "Material for MkDocs",
+            "url": "https://squidfunk.github.io/mkdocs-material",
+            "patterns": ["<[^>]+data-md-color-scheme=", "<[^>]+data-md-component=", "<[^>]+data-md-toggle="]
           }
         ]
       },
