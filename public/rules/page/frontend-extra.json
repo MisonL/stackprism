@@ -463,7 +463,7 @@
             "patterns": [
               "(?:^|/)react-router(?:-dom)?(?:@[\\d.]+)?(?:/[^\\s\"'<>]+)?\\.(?:m?js|cjs)(?:[?#\"'<>\\s]|$)"
             ],
-            "globals": ["ReactRouter", "ReactRouterDOM"]
+            "globals": ["ReactRouter", "ReactRouterDOM", "__reactRouterVersion"]
           },
           {
             "name": "Anime.js",

@@ -18,7 +18,7 @@
             {
               "name": "Vue",
               "patterns": ["vue(?:\\.runtime)?(?:\\.global)?(?:\\.prod)?(?:\\.min)?\\.js", "vue-router", "pinia"],
-              "globals": ["Vue"],
+              "globals": ["Vue", "__VUE_DEVTOOLS_GLOBAL_HOOK__"],
               "selectors": ["[data-v-app]", "#app.__vue__"]
             },
             {

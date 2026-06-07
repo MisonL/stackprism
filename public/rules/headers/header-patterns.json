@@ -248,7 +248,7 @@
               },
               {
                 "name": "Vercel",
-                "patterns": ["(?:^|\\n)x-vercel-id:", "(?:^|\\n)x-matched-path:", "server:.*vercel"],
+                "patterns": ["(?:^|\\n)x-vercel-id:", "server:.*vercel"],
                 "evidence": "存在 Vercel 响应头"
               },
               {
