@@ -155,11 +155,26 @@
         "kind": "论坛 / 社区",
         "patterns": [
           "<meta[^>]+name=[\"']?generator[\"']?[^>]+content=[\"'][^\"']*discourse",
+          "<meta[^>]+name=[\"']?discourse-version[\"']?",
           "__DISCOURSE",
           "/assets/discourse-",
           "discourse_theme"
         ],
-        "globals": ["Discourse"]
+        "globals": ["Discourse", "Discourse.SiteSettings", "Discourse.User"],
+        "selectors": [".discourse-application", "#discourse-modal"]
+      },
+      {
+        "name": "OpenList",
+        "kind": "文件列表",
+        "patterns": [
+          "<meta[^>]+name=[\"']?generator[\"']?[^>]+content=[\"'][^\"']*OpenList"
+        ],
+        "globals": ["OPENLIST_CONFIG"]
+      },
+      {
+        "name": "Cloudreve",
+        "kind": "网盘",
+        "patterns": ["cloudreve-frontend"]
       },
       {
         "name": "MediaWiki",
@@ -290,7 +305,7 @@
           },
           {
             "name": "VuePress",
-            "patterns": ["vuepress", "__VUEPRESS__"]
+            "patterns": ["<meta[^>]+name=[\"']?generator[\"']?[^>]+content=[\"'][^\"']*VuePress", "vuepress", "__VUEPRESS__"]
           },
           {
             "name": "Docsify",
