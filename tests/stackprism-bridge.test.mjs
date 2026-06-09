@@ -381,6 +381,80 @@ test('settings and help pages document mobile and agent bridge UI boundaries', (
   assert.match(help, /@media \(max-width: 760px\)[\s\S]*\.help-header[\s\S]*position: static/)
 })
 
+test('settings page requests browser data consent before enabling Agent Bridge', () => {
+  const settings = readFileSync('src/ui/settings/Settings.vue', 'utf8')
+  const consentCall = settings.indexOf('requestAgentBridgeDataConsent()')
+  const confirmationCall = settings.indexOf('requestConfirmation({')
+  const syncSave = settings.indexOf('chrome.storage.sync.set')
+  const localSave = settings.indexOf('chrome.storage.local.set')
+
+  assert.match(settings, /requestAgentBridgeDataConsent/)
+  assert.match(settings, /rollbackPendingAgentBridgeDataConsent/)
+  assert.match(settings, /await updateAgentBridgeDataConsentState\(await loadAgentBridgeDataConsentSnapshot\(\), consentSnapshot\)/)
+  assert.match(
+    settings,
+    /try \{\s*agentBridgeDataConsentGranted = await requestAgentBridgeDataConsent\(\)\s*\} catch \(error: any\) \{\s*if \(await rollbackPendingAgentBridgeDataConsent\(consentSnapshot, true\)\) \{\s*showStatus\(`保存失败：/
+  )
+  assert.match(
+    settings,
+    /if \(!confirmed\) \{\s*if \(await rollbackPendingAgentBridgeDataConsent\(consentSnapshot, agentBridgeDataConsentGranted\)\) \{\s*showStatus\('已取消保存。', 'error'\)/
+  )
+  assert.match(
+    settings,
+    /catch \(error: any\) \{\s*if \(await rollbackPendingAgentBridgeDataConsent\(consentSnapshot, agentBridgeDataConsentGranted\)\) \{\s*showStatus\(`保存失败：/
+  )
+  assert.doesNotMatch(settings, /savedAgentBridgeEnabled\.value\s*&&\s*!\(await requestAgentBridgeDataConsent\(\)\)/)
+  assert.doesNotMatch(settings, /Promise\.all\(\[\s*chrome\.storage\.sync\.set[\s\S]*chrome\.storage\.local\.set/)
+  assert.ok(consentCall > 0, 'settings page must request Agent Bridge data consent')
+  assert.ok(consentCall < confirmationCall, 'settings page must request data consent before awaited confirmations')
+  assert.ok(syncSave > consentCall, 'settings page must request data consent before saving sync settings')
+  assert.ok(syncSave < localSave, 'settings page must save sync settings before local Agent Bridge flags')
+  assert.ok(localSave > consentCall, 'settings page must request data consent before saving local Agent Bridge opt-in')
+})
+
+test('settings reset revokes browser data consent before clearing Agent Bridge defaults', () => {
+  const settings = readFileSync('src/ui/settings/Settings.vue', 'utf8')
+  const resetStart = settings.indexOf('const resetSettings = async () => {')
+  const resetSection = settings.slice(resetStart, settings.indexOf('\n\n  const openHelp =', resetStart))
+
+  assert.match(settings, /const agentBridgeDataConsentBaseline = ref<AgentBridgeDataConsentSnapshot \| null>\(null\)/)
+  assert.match(resetSection, /const consentSnapshot = agentBridgeDataConsentBaseline\.value/)
+  assert.match(resetSection, /if \(consentSnapshot\?\.supported\) \{/)
+  assert.match(resetSection, /await rollbackAgentBridgeDataConsent\(consentSnapshot\)/)
+  assert.match(settings, /const updateAgentBridgeDataConsentState = async \(/)
+  assert.match(settings, /await updateAgentBridgeDataConsentState\(await loadAgentBridgeDataConsentSnapshot\(\), consentSnapshot\)/)
+  assert.match(resetSection, /await updateAgentBridgeDataConsentState\(await loadAgentBridgeDataConsentSnapshot\(\)\)/)
+  assert.ok(
+    resetSection.indexOf('await rollbackAgentBridgeDataConsent(consentSnapshot)') < resetSection.indexOf('chrome.storage.sync.set'),
+    'settings reset must revoke browser data consent before clearing stored settings'
+  )
+})
+
+test('settings page revokes browser data consent before saving Agent Bridge disabled', () => {
+  const settings = readFileSync('src/ui/settings/Settings.vue', 'utf8')
+  const helperStart = settings.indexOf('const revokeDisabledAgentBridgeDataConsent = async')
+  const saveStart = settings.indexOf('const saveSettings = async () => {')
+  const saveSection = settings.slice(saveStart, settings.indexOf('\n\n  const resetSettings =', saveStart))
+
+  assert.match(settings, /revokeAgentBridgeDataConsent/)
+  assert.match(settings.slice(helperStart, saveStart), /if \(agentBridgeEnabled \|\| !savedAgentBridgeEnabled\.value\) return true/)
+  assert.match(settings.slice(helperStart, saveStart), /await revokeAgentBridgeDataConsent\(\)/)
+  assert.match(saveSection, /if \(!\(await revokeDisabledAgentBridgeDataConsent\(settings\.agentBridgeEnabled\)\)\) return/)
+  assert.ok(
+    saveSection.indexOf('await revokeDisabledAgentBridgeDataConsent(settings.agentBridgeEnabled)') < saveSection.indexOf('chrome.storage.sync.set'),
+    'settings save must revoke browser data consent before writing disabled Agent Bridge state'
+  )
+})
+
+test('settings page keeps sync-backed settings when local Agent Bridge flags fail to load', () => {
+  const settings = readFileSync('src/ui/settings/Settings.vue', 'utf8')
+
+  assert.match(settings, /const stored = await chrome\.storage\.sync\.get\(SETTINGS_STORAGE_KEY\)/)
+  assert.match(settings, /let local: Record<string, any> = \{\}/)
+  assert.match(settings, /try \{\s*local = await chrome\.storage\.local\.get\(SETTINGS_STORAGE_KEY\)\s*\} catch \{\s*local = \{\}\s*\}/)
+  assert.doesNotMatch(settings, /const \[stored, local\] = await Promise\.all\(\[/)
+})
+
 test('bridge page script supports profile download, screenshot actions and modal focus loop', async () => {
   const { context, document, elements, steps, writtenItems, writtenText, objectUrls } = await createBridgeScriptHarness()
 
@@ -1361,16 +1435,30 @@ test('bridge token can fetch request and post profile but cannot read profile', 
       posted.body.preview.screenshot.downloadUrl
     )
 
-    const screenshotDownload = await readBytes(await fetch(downloaded.body.visualProfile.screenshot.downloadUrl))
+    const unauthenticatedScreenshotDownload = await readBytes(await fetch(downloaded.body.visualProfile.screenshot.downloadUrl))
+    assert.equal(unauthenticatedScreenshotDownload.status, 200)
+    assert.equal(unauthenticatedScreenshotDownload.headers.get('content-type'), 'image/jpeg')
+    assert.equal(unauthenticatedScreenshotDownload.body.toString('utf8'), 'fake-jpeg')
+
+    const screenshotDownload = await readBytes(
+      await fetch(downloaded.body.visualProfile.screenshot.downloadUrl, { headers: auth(config.bridgeToken) })
+    )
     assert.equal(screenshotDownload.status, 200)
     assert.equal(screenshotDownload.headers.get('content-type'), 'image/jpeg')
     assert.equal(screenshotDownload.headers.get('content-disposition'), `attachment; filename="stackprism-${created.body.id}-screenshot.jpg"`)
     assert.equal(screenshotDownload.body.toString('utf8'), 'fake-jpeg')
 
+    const apiScreenshotDownload = await readBytes(
+      await fetch(downloaded.body.visualProfile.screenshot.downloadUrl, { headers: auth(ready.apiToken) })
+    )
+    assert.equal(apiScreenshotDownload.status, 200)
+    assert.equal(apiScreenshotDownload.headers.get('content-type'), 'image/jpeg')
+    assert.equal(apiScreenshotDownload.body.toString('utf8'), 'fake-jpeg')
+
     const badScreenshotUrl = `${ready.baseUrl}/v1/captures/${created.body.id}/screenshot-download/shot_${'x'.repeat(43)}`
     const missingScreenshotAuth = await readJson(await fetch(badScreenshotUrl))
-    assert.equal(missingScreenshotAuth.status, 401)
-    assert.equal(missingScreenshotAuth.body.error.code, 'UNAUTHORIZED')
+    assert.equal(missingScreenshotAuth.status, 403)
+    assert.equal(missingScreenshotAuth.body.error.code, 'FORBIDDEN')
     const badScreenshotDownload = await readJson(await fetch(badScreenshotUrl, { headers: auth(config.bridgeToken) }))
     assert.equal(badScreenshotDownload.status, 403)
     assert.equal(badScreenshotDownload.body.error.code, 'FORBIDDEN')
@@ -1427,7 +1515,7 @@ test('bridge status preview derives screenshot mime type from the data URL', asy
   })
 })
 
-test('profile reads and public screenshot downloads refresh result TTL', async () => {
+test('profile reads and authenticated screenshot downloads refresh result TTL', async () => {
   let now = 1000
   await withBridge(
     async ready => {
@@ -1464,7 +1552,7 @@ test('profile reads and public screenshot downloads refresh result TTL', async (
       assert.ok(capture.resultExpiresAt > firstExpiry)
 
       now = firstExpiry + 1
-      const screenshot = await readBytes(await fetch(profileRead.body.visualProfile.screenshot.downloadUrl))
+      const screenshot = await readBytes(await fetch(profileRead.body.visualProfile.screenshot.downloadUrl, { headers: auth(config.bridgeToken) }))
       assert.equal(screenshot.status, 200)
       assert.equal(screenshot.headers.get('content-type'), 'image/png')
       assert.equal(screenshot.body.toString('utf8'), 'fake-png')
@@ -1474,7 +1562,7 @@ test('profile reads and public screenshot downloads refresh result TTL', async (
       assert.ok(capture.resultExpiresAt > firstExpiry + 99)
 
       now = capture.resultExpiresAt + 1
-      const expiredScreenshot = await readJson(await fetch(profileRead.body.visualProfile.screenshot.downloadUrl))
+      const expiredScreenshot = await readJson(await fetch(profileRead.body.visualProfile.screenshot.downloadUrl, { headers: auth(config.bridgeToken) }))
       assert.equal(expiredScreenshot.status, 410)
       assert.equal(expiredScreenshot.body.error.code, 'CAPTURE_RESULT_EXPIRED')
       assert.equal(capture.profile, null)

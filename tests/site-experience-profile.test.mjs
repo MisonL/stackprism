@@ -103,6 +103,157 @@ test('detector settings preserves sync settings when local opt-in storage is una
   delete globalThis.chrome
 })
 
+test('firefox data consent helpers request only Agent Bridge optional categories', async () => {
+  const requested = []
+  let getAllCalled = false
+  globalThis.chrome = {
+    runtime: {
+      getManifest: () => ({
+        browser_specific_settings: {
+          gecko: {
+            data_collection_permissions: {
+              optional: ['browsingActivity', 'technicalAndInteraction', 'websiteContent']
+            }
+          }
+        }
+      })
+    },
+    permissions: {
+      getAll: async () => {
+        getAllCalled = true
+        return { data_collection: ['browsingActivity'] }
+      },
+      request: async permissions => {
+        assert.equal(getAllCalled, false)
+        requested.push(permissions)
+        return true
+      }
+    }
+  }
+  const { AGENT_BRIDGE_DATA_COLLECTION_PERMISSIONS, hasAgentBridgeDataConsent, requestAgentBridgeDataConsent } =
+    await loadTsModule('src/utils/firefox-data-consent.ts')
+
+  assert.deepEqual(AGENT_BRIDGE_DATA_COLLECTION_PERMISSIONS, ['browsingActivity', 'technicalAndInteraction', 'websiteContent'])
+  assert.equal(await hasAgentBridgeDataConsent(), false)
+  getAllCalled = false
+  const requestedConsent = requestAgentBridgeDataConsent()
+  assert.deepEqual(requested, [{ data_collection: ['browsingActivity', 'technicalAndInteraction', 'websiteContent'] }])
+  assert.equal(getAllCalled, false)
+  assert.equal(await requestedConsent, true)
+  assert.deepEqual(requested, [{ data_collection: ['browsingActivity', 'technicalAndInteraction', 'websiteContent'] }])
+  delete globalThis.chrome
+})
+
+test('firefox data consent helpers do not block browsers without the data consent API', async () => {
+  globalThis.chrome = { permissions: {} }
+  const { hasAgentBridgeDataConsent, requestAgentBridgeDataConsent } = await loadTsModule('src/utils/firefox-data-consent.ts')
+
+  assert.equal(await hasAgentBridgeDataConsent(), true)
+  assert.equal(await requestAgentBridgeDataConsent(), true)
+  delete globalThis.chrome
+})
+
+test('firefox data consent helpers skip request outside Firefox data collection manifests', async () => {
+  globalThis.chrome = {
+    runtime: { getManifest: () => ({}) },
+    permissions: {
+      request: async () => {
+        throw new Error('request should not be called')
+      }
+    }
+  }
+  const { requestAgentBridgeDataConsent } = await loadTsModule('src/utils/firefox-data-consent.ts')
+
+  assert.equal(await requestAgentBridgeDataConsent(), true)
+  delete globalThis.chrome
+})
+
+test('firefox data consent rollback removes only categories granted by the pending request', async () => {
+  const removed = []
+  globalThis.chrome = {
+    runtime: {
+      getManifest: () => ({
+        browser_specific_settings: {
+          gecko: {
+            data_collection_permissions: {
+              optional: ['browsingActivity', 'technicalAndInteraction', 'websiteContent']
+            }
+          }
+        }
+      })
+    },
+    permissions: {
+      remove: async permissions => {
+        removed.push(permissions)
+        return true
+      }
+    }
+  }
+  const { rollbackAgentBridgeDataConsent } = await loadTsModule('src/utils/firefox-data-consent.ts')
+
+  assert.equal(
+    await rollbackAgentBridgeDataConsent({
+      supported: true,
+      granted: ['browsingActivity'],
+      missing: ['technicalAndInteraction', 'websiteContent']
+    }),
+    true
+  )
+  assert.deepEqual(removed, [{ data_collection: ['technicalAndInteraction', 'websiteContent'] }])
+
+  removed.length = 0
+  assert.equal(
+    await rollbackAgentBridgeDataConsent({
+      supported: true,
+      granted: ['browsingActivity', 'technicalAndInteraction', 'websiteContent'],
+      missing: []
+    }),
+    false
+  )
+  assert.deepEqual(removed, [])
+  delete globalThis.chrome
+})
+
+test('firefox data consent revoke removes currently granted Agent Bridge categories', async () => {
+  const removed = []
+  globalThis.chrome = {
+    runtime: {
+      getManifest: () => ({
+        browser_specific_settings: {
+          gecko: {
+            data_collection_permissions: {
+              optional: ['browsingActivity', 'technicalAndInteraction', 'websiteContent']
+            }
+          }
+        }
+      })
+    },
+    permissions: {
+      getAll: async () => ({ data_collection: ['browsingActivity', 'websiteContent'] }),
+      remove: async permissions => {
+        removed.push(permissions)
+        return true
+      }
+    }
+  }
+  const { revokeAgentBridgeDataConsent } = await loadTsModule('src/utils/firefox-data-consent.ts')
+
+  assert.equal(await revokeAgentBridgeDataConsent(), true)
+  assert.deepEqual(removed, [{ data_collection: ['browsingActivity', 'websiteContent'] }])
+  delete globalThis.chrome
+})
+
+test('firefox data consent removal detection is limited to Agent Bridge categories', async () => {
+  const { includesAgentBridgeDataConsentRemoval } = await loadTsModule('src/utils/firefox-data-consent.ts')
+
+  assert.equal(includesAgentBridgeDataConsentRemoval({ data_collection: ['websiteContent'] }), true)
+  assert.equal(includesAgentBridgeDataConsentRemoval({ data_collection: ['browsingActivity'] }), true)
+  assert.equal(includesAgentBridgeDataConsentRemoval({ data_collection: ['technicalAndInteraction'] }), true)
+  assert.equal(includesAgentBridgeDataConsentRemoval({ data_collection: ['locationInfo'] }), false)
+  assert.equal(includesAgentBridgeDataConsentRemoval({ permissions: ['tabs'] }), false)
+  assert.equal(includesAgentBridgeDataConsentRemoval(null), false)
+})
+
 test('defines the site experience schema and required capabilities', async () => {
   const contract = await loadTsModule('src/types/agent-bridge.ts')
 
@@ -237,6 +388,135 @@ test('redacts sensitive headers in header records', async () => {
   }
 })
 
+test('popup results ignore cross-site HTTP protocol observations', async () => {
+  resetLoadTsModuleCaches()
+  const originalChrome = globalThis.chrome
+  const originalFetch = globalThis.fetch
+  globalThis.chrome = {
+    runtime: {
+      getURL: path => `chrome-extension://stackprism/${path}`
+    }
+  }
+  globalThis.fetch = async url => {
+    const text = String(url)
+    if (text.endsWith('/rules/index.json')) return new Response(JSON.stringify({ schemaVersion: 1, files: [] }), { status: 200 })
+    if (text.endsWith('/tech-links.json')) return new Response(JSON.stringify({ links: {} }), { status: 200 })
+    return new Response('{}', { status: 200 })
+  }
+
+  try {
+    const { buildPopupCacheRecord, buildPopupRawResult } = await loadTsModule('src/background/popup-cache.ts')
+    const data = {
+      updatedAt: 1,
+      page: { url: 'https://app.example.com/dashboard', title: 'Dashboard', technologies: [] },
+      main: { url: 'https://app.example.com/dashboard', technologies: [], headers: {}, headerCount: 0 },
+      apis: [
+        { url: 'https://api.example.com/graphql', httpProtocol: '2', technologies: [] },
+        { url: 'https://payments.example-cdn.test/session', httpProtocol: '3', technologies: [] }
+      ],
+      frames: [{ url: 'https://checkout.example-cdn.test/embed', httpProtocol: 'h3', technologies: [] }]
+    }
+    const settings = {}
+    const tab = { url: 'https://app.example.com/dashboard', title: 'Dashboard' }
+
+    const raw = await buildPopupRawResult(data, settings, tab)
+    const popup = await buildPopupCacheRecord(data, settings, tab)
+    const rawNames = raw.technologies.map(tech => tech.name).sort()
+    const popupNames = popup.technologies.map(tech => tech.name).sort()
+
+    assert.deepEqual(rawNames, ['HTTP/2'])
+    assert.deepEqual(popupNames, ['HTTP/2'])
+    assert.match(raw.technologies[0].evidence.join('\n'), /api\.example\.com/)
+    assert.doesNotMatch(JSON.stringify([...raw.technologies, ...popup.technologies]), /example-cdn\.test|HTTP\/3/)
+  } finally {
+    if (originalChrome === undefined) delete globalThis.chrome
+    else globalThis.chrome = originalChrome
+    if (originalFetch === undefined) delete globalThis.fetch
+    else globalThis.fetch = originalFetch
+  }
+})
+
+test('popup results keep intentional cross-site service detections and drop infrastructure detections', async () => {
+  resetLoadTsModuleCaches()
+  const originalChrome = globalThis.chrome
+  const originalFetch = globalThis.fetch
+  globalThis.chrome = {
+    runtime: {
+      getURL: path => `chrome-extension://stackprism/${path}`
+    }
+  }
+  globalThis.fetch = async url => {
+    const text = String(url)
+    if (text.endsWith('/rules/index.json')) return new Response(JSON.stringify({ schemaVersion: 1, files: [] }), { status: 200 })
+    if (text.endsWith('/tech-links.json')) return new Response(JSON.stringify({ links: {} }), { status: 200 })
+    return new Response('{}', { status: 200 })
+  }
+
+  try {
+    const { buildPopupCacheRecord, buildPopupRawResult } = await loadTsModule('src/background/popup-cache.ts')
+    const data = {
+      updatedAt: 1,
+      page: { url: 'https://shop.example.com/checkout', title: 'Checkout', technologies: [] },
+      main: { url: 'https://shop.example.com/checkout', technologies: [], headers: {}, headerCount: 0 },
+      apis: [
+        {
+          url: 'https://api.stripe.com/v1/payment_intents',
+          technologies: [
+            { category: '支付系统', name: 'Stripe', confidence: '高', evidence: ['Stripe API response'], source: '响应头' },
+            { category: 'Headless CMS', name: 'Contentful', confidence: '高', evidence: ['cdn.contentful.com'], source: '响应头' },
+            { category: 'IP 地理位置 / IP 情报', name: 'IPinfo', confidence: '高', evidence: ['ipinfo.io'], source: '响应头' },
+            { category: 'CDN / 托管', name: 'Cloudflare', confidence: '高', evidence: ['cf-ray'], source: '响应头' },
+            { category: 'Web 服务器', name: 'nginx', confidence: '中', evidence: ['server: nginx'], source: '响应头' }
+          ]
+        }
+      ],
+      frames: [
+        {
+          url: 'https://accounts.google.com/o/oauth2/v2/auth',
+          technologies: [
+            { category: '第三方登录 / OAuth', name: 'Google Sign-In', confidence: '高', evidence: ['accounts.google.com'], source: '响应头' }
+          ]
+        }
+      ]
+    }
+    const settings = {}
+    const tab = { url: 'https://shop.example.com/checkout', title: 'Checkout' }
+
+    const raw = await buildPopupRawResult(data, settings, tab)
+    const popup = await buildPopupCacheRecord(data, settings, tab)
+    const rawNames = raw.technologies.map(tech => tech.name).sort()
+    const popupNames = popup.technologies.map(tech => tech.name).sort()
+
+    assert.deepEqual(rawNames, ['Contentful', 'Google Sign-In', 'IPinfo', 'Stripe'])
+    assert.deepEqual(popupNames, ['Contentful', 'Google Sign-In', 'IPinfo', 'Stripe'])
+    assert.match(raw.technologies.find(tech => tech.name === 'Stripe').sources.join('\n'), /API/)
+    assert.match(raw.technologies.find(tech => tech.name === 'Contentful').sources.join('\n'), /API/)
+    assert.match(raw.technologies.find(tech => tech.name === 'IPinfo').sources.join('\n'), /API/)
+    assert.doesNotMatch(JSON.stringify([...raw.technologies, ...popup.technologies]), /Cloudflare|nginx/)
+  } finally {
+    if (originalChrome === undefined) delete globalThis.chrome
+    else globalThis.chrome = originalChrome
+    if (originalFetch === undefined) delete globalThis.fetch
+    else globalThis.fetch = originalFetch
+  }
+})
+
+test('same-site comparison treats common public hosting tenants as separate sites', async () => {
+  const { getRegistrableDomain, isSameSite } = await loadTsModule('src/utils/domain.ts')
+
+  assert.equal(getRegistrableDomain('foo.github.io'), 'foo.github.io')
+  assert.equal(getRegistrableDomain('bar.github.io'), 'bar.github.io')
+  assert.equal(isSameSite('https://bar.github.io/api', 'https://foo.github.io/app'), false)
+  assert.equal(isSameSite('https://assets.foo.github.io/app.js', 'https://foo.github.io/app'), true)
+  assert.equal(isSameSite('https://bar.vercel.app/api', 'https://foo.vercel.app/app'), false)
+  assert.equal(isSameSite('https://bar.netlify.app/api', 'https://foo.netlify.app/app'), false)
+  assert.equal(isSameSite('https://bar.pages.dev/api', 'https://foo.pages.dev/app'), false)
+  assert.equal(getRegistrableDomain('foo.up.railway.app'), 'foo.up.railway.app')
+  assert.equal(getRegistrableDomain('bar.up.railway.app'), 'bar.up.railway.app')
+  assert.equal(isSameSite('https://bar.up.railway.app/api', 'https://foo.up.railway.app/app'), false)
+  assert.equal(isSameSite('https://assets.foo.up.railway.app/app.js', 'https://foo.up.railway.app/app'), true)
+})
+
 test('builds a redacted site experience profile from raw popup data and experience signals', async () => {
   const { buildSiteExperienceProfile } = await loadTsModule('src/utils/site-experience-profile.ts')
   const capabilities = {
@@ -332,7 +612,7 @@ test('builds a redacted site experience profile from raw popup data and experien
       evidence: {
         inaccessibleStylesheets: 2,
         crossOriginIframes: 1,
-        omitted: { resourceUrls: 3, textSamples: 2, componentSamples: 1, cssRules: 4 }
+        omitted: { resourceUrls: 3, textSamples: 2, componentSamples: 1, cssRules: 4, executeScriptResultOverLimit: 2 }
       }
     },
     capabilities,
@@ -355,6 +635,7 @@ test('builds a redacted site experience profile from raw popup data and experien
   assert.deepEqual(profile.uxProfile.contentGrouping, ['summary', 'details'])
   assert.deepEqual(profile.uxProfile.frictionPoints, ['Long table without visible filters'])
   assert.equal(profile.evidence.truncation.resourceUrls, 3)
+  assert.equal(profile.evidence.truncation.executeScriptResultOverLimit, 2)
   assert.equal(profile.visualProfile.aboveFold, undefined)
   assert.equal(profile.layoutProfile.boundingBoxes, undefined)
   assert.ok(profile.limitations.includes('viewport_emulation_unsupported'))
@@ -367,6 +648,7 @@ test('builds a redacted site experience profile from raw popup data and experien
   assert.ok(profile.limitations.includes('text_samples_truncated'))
   assert.ok(profile.limitations.includes('component_samples_truncated'))
   assert.ok(profile.limitations.includes('css_rules_truncated'))
+  assert.ok(profile.limitations.includes('execute_script_result_truncated'))
   assert.match(profile.agentGuidance.summary, /Vue/)
   assert.doesNotMatch(profile.agentGuidance.summary, /secret|user@example\.com|13800138000|\u0000/)
   assert.match(profile.agentGuidance.recreationPlan.objective, /Recreate/)
@@ -403,6 +685,77 @@ test('builds a redacted site experience profile from raw popup data and experien
     serialized,
     /token=\[redacted\]|signature=\[redacted\]|auth=\[redacted\]|session=\[redacted\]|key=\[redacted\]|preview=\[redacted\]/
   )
+})
+
+test('builds a site experience profile that preserves requested and final urls separately', async () => {
+  const { buildSiteExperienceProfile } = await loadTsModule('src/utils/site-experience-profile.ts')
+
+  const profile = buildSiteExperienceProfile({
+    captureId: 'cap_CCCCCCCCCCCCCCCCCCCCCC',
+    request: {
+      url: 'https://example.com/start',
+      mode: 'experience',
+      waitMs: 0,
+      include: ['tech'],
+      viewports: [],
+      options: {
+        forceRefresh: false,
+        captureScreenshotMetadata: false,
+        captureScreenshot: false,
+        keepTabOpen: false,
+        allowPrivateNetworkTarget: false,
+        targetMode: 'reuse_or_new_tab',
+        maxResourceUrls: 300
+      },
+      protocolVersion: 1
+    },
+    raw: {
+      url: 'https://example.com/final?token=secret#frag',
+      title: 'Redirected',
+      generatedAt: '2026-05-22T06:00:00.000Z',
+      technologies: [],
+      resources: null,
+      headers: []
+    },
+    experience: {},
+    capabilities: {
+      agentBridge: true,
+      siteExperienceProfileV1: true,
+      profileChunkTransport: true,
+      bridgeContentPost: true,
+      storageSession: true,
+      experienceProfiler: true,
+      rawProfile: true,
+      viewportMetadata: true
+    },
+    finalUrl: 'https://example.com/final?token=secret#frag'
+  })
+
+  assert.equal(profile.target.url, 'https://example.com/start')
+  assert.equal(profile.target.finalUrl, 'https://example.com/final?token=[redacted]')
+  assert.equal(profile.target.origin, 'https://example.com')
+})
+
+test('build evidence records header coverage for raw header maps', async () => {
+  const { buildEvidence } = await loadTsModule('src/utils/site-experience-profile-sections.ts')
+  const technologies = [{ category: '前端框架', name: 'Vue', confidence: '高', evidence: [], sources: [] }]
+  const experience = {}
+
+  const fromArray = buildEvidence(
+    { headers: [{ name: 'x-powered-by', value: 'StackPrism' }], technologies: [], resources: null },
+    technologies,
+    { resourceUrls: [] },
+    experience
+  )
+  const fromMap = buildEvidence(
+    { headers: { 'x-powered-by': 'StackPrism' }, technologies: [], resources: null },
+    technologies,
+    { resourceUrls: [] },
+    experience
+  )
+
+  assert.equal(fromArray.sourceCoverage.includes('headers'), true)
+  assert.equal(fromMap.sourceCoverage.includes('headers'), true)
 })
 
 test('builds optional screenshot payload only when explicitly requested', async () => {
@@ -724,7 +1077,16 @@ test('uses profiler truncation evidence and strips screenshot metadata aliases w
       },
       ux: { textSamples: ['Buy now'] },
       assets: { urls: [] },
-      evidence: { truncation: { resourceUrls: 7, textSamples: 6, componentSamples: 5, cssRules: 4, executeScriptResult: 3 } },
+      evidence: {
+        truncation: {
+          resourceUrls: 7,
+          textSamples: 6,
+          componentSamples: 5,
+          cssRules: 4,
+          executeScriptResult: 3,
+          executeScriptResultOverLimit: 2
+        }
+      },
       limitations: ['passive_interaction_only']
     },
     capabilities: {
@@ -745,7 +1107,8 @@ test('uses profiler truncation evidence and strips screenshot metadata aliases w
     textSamples: 6,
     componentSamples: 5,
     cssRules: 4,
-    executeScriptResult: 3
+    executeScriptResult: 3,
+    executeScriptResultOverLimit: 2
   })
   assert.equal(profile.evidence.rawCounts.cssRules, 4)
   const serialized = JSON.stringify({
@@ -760,6 +1123,23 @@ test('uses profiler truncation evidence and strips screenshot metadata aliases w
   assert.ok(profile.limitations.includes('css_rules_truncated'))
   assert.ok(profile.limitations.includes('execute_script_result_truncated'))
   assert.ok(profile.limitations.includes('passive_interaction_only'))
+})
+
+test('marks executeScript result truncation when final profiler output remains oversized', async () => {
+  const { buildLimitations } = await loadTsModule('src/utils/site-experience-limitations.ts')
+  const limitations = buildLimitations(
+    {
+      viewports: [],
+      include: ['tech', 'visual', 'layout', 'components', 'interaction', 'ux', 'assets'],
+      options: { captureScreenshot: true, captureScreenshotMetadata: true }
+    },
+    {
+      evidence: { truncation: { executeScriptResult: 0, executeScriptResultOverLimit: 2 } },
+      limitations: []
+    }
+  )
+
+  assert.ok(limitations.includes('execute_script_result_truncated'))
 })
 
 test('redacts sensitive profile object keys and externally supplied limitations', async () => {
@@ -797,11 +1177,11 @@ test('redacts sensitive profile object keys and externally supplied limitations'
     experience: {
       layout: {
         'token=secret': 'visible',
-        safe: { 'authorization=Bearer secret': 'https://cdn.example.com/app.js?signature=abc#frag' },
+        safe: { 'authorization=Bearer sk_live_abc123': 'https://cdn.example.com/app.js?signature=abc#frag' },
         'apiToken=spb_secret': 'sessionId=s_secret'
       },
       interaction: {
-        'session=abc': 'hover token=secret',
+        'session=abc': 'hover token=secret Authorization: Bearer sk_live_xyz789',
         'secretKey=abc': 'bridgeToken=spbt_secret'
       },
       evidence: { truncation: {} },
@@ -813,7 +1193,9 @@ test('redacts sensitive profile object keys and externally supplied limitations'
 
   const serialized = JSON.stringify(profile)
   assert.equal(serialized.includes('token=secret'), false)
-  assert.equal(serialized.includes('authorization=Bearer secret'), false)
+  assert.equal(serialized.includes('authorization=Bearer sk_live_abc123'), false)
+  assert.equal(serialized.includes('sk_live_abc123'), false)
+  assert.equal(serialized.includes('sk_live_xyz789'), false)
   assert.equal(serialized.includes('apiToken=spb_secret'), false)
   assert.equal(serialized.includes('sessionId=s_secret'), false)
   assert.equal(serialized.includes('secretKey=abc'), false)

@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
+import { packageFirefox } from '../build-scripts/package-firefox.mjs'
 
 const workflowSource = await readFile(new URL('../.github/workflows/release-extension.yml', import.meta.url), 'utf8')
 const normalizedWorkflowSource = workflowSource.replaceAll('\\/', '/')
@@ -35,7 +36,7 @@ async function withDist(files, testFn) {
       await writeFile(fullPath, content)
     }
 
-    return testFn(cwd)
+    return await testFn(cwd)
   } finally {
     await rm(cwd, { recursive: true, force: true })
   }
@@ -91,6 +92,25 @@ function agentBridgeManifest(overrides = {}) {
   })
 }
 
+async function withFirefoxDist(files, testFn) {
+  const cwd = await mkdtemp(join(tmpdir(), 'stackprism-firefox-package-'))
+
+  try {
+    await withFiles(cwd, files)
+    return await testFn(cwd)
+  } finally {
+    await rm(cwd, { recursive: true, force: true })
+  }
+}
+
+async function withFiles(cwd, files) {
+  for (const [file, content] of Object.entries(files)) {
+    const fullPath = join(cwd, file)
+    await mkdir(join(fullPath, '..'), { recursive: true })
+    await writeFile(fullPath, content)
+  }
+}
+
 test('release workflow rejects agent bridge helper source files from dist artifacts', () => {
   const requiredArtifacts = [
     'agent-skill',
@@ -133,6 +153,36 @@ test('release workflow runs required gates before packaging artifacts', () => {
     assert.ok(match.index > previousIndex, `release gate out of order: ${pattern}`)
     previousIndex = match.index
   }
+})
+
+test('firefox package manifest declares no required data collection', async () => {
+  await withFirefoxDist(
+    {
+      'dist/manifest.json': manifest({
+        background: { service_worker: 'service-worker-loader.js' }
+      }),
+      'dist/service-worker-loader.js': "import './assets/background-entry.js'",
+      'dist/assets/background-entry.js': 'chrome.runtime.onInstalled.addListener(() => {})'
+    },
+    async cwd => {
+      const result = await packageFirefox({ root: cwd, logger: { log() {} } })
+      const manifestJson = JSON.parse(await readFile(result.manifestPath, 'utf8'))
+
+      assert.deepEqual(manifestJson.background, { scripts: ['background.js'] })
+      assert.deepEqual(manifestJson.browser_specific_settings, {
+        gecko: {
+          id: 'stackprism@setube.github.io',
+          data_collection_permissions: {
+            required: ['none'],
+            optional: ['browsingActivity', 'technicalAndInteraction', 'websiteContent']
+          },
+          strict_min_version: '128.0'
+        }
+      })
+      assert.ok((await stat(join(cwd, 'dist-firefox/background.js'))).isFile())
+      assert.ok((await stat(join(cwd, 'release/stackprism-v1.3.71.xpi'))).isFile())
+    }
+  )
 })
 
 test('release workflow requires Agent Bridge disclosure confirmation before packaging', () => {

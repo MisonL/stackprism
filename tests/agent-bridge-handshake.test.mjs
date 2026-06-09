@@ -1319,3 +1319,212 @@ test('bridge client registers profile transfer port only after hello succeeds', 
   assert.doesNotMatch(source, /console\.error\([^)]*,\s*error\)/)
   assert.match(source, /errorCode: errorFromUnknown/)
 })
+
+test('bridge client surfaces sendMessage lastError as extension not connected during hello', async () => {
+  const originalWindow = globalThis.window
+  const originalDocument = globalThis.document
+  const originalChrome = globalThis.chrome
+  const originalLocation = globalThis.location
+  const originalFetch = globalThis.fetch
+  const { resetLoadTsModuleCaches, loadTsModule: freshLoadTsModule } = await import('./helpers/load-ts-module.mjs')
+  resetLoadTsModuleCaches()
+
+  const statusPosts = []
+  const runtimeMessages = []
+  const lastError = { message: 'Could not establish connection. Receiving end does not exist.' }
+  globalThis.location = new URL(bridgeUrl)
+  globalThis.window = {
+    addEventListener: () => {},
+    setInterval: () => {
+      throw new Error('control polling must not start when hello sendMessage fails')
+    },
+    clearInterval: () => {}
+  }
+  globalThis.document = {
+    querySelector: selector => {
+      if (selector === 'meta[name="stackprism-agent-bridge"][content="1"]') return {}
+      if (selector === '#stackprism-agent-bridge-config[type="application/json"]') {
+        return { textContent: JSON.stringify({ captureId, sessionId, nonce, bridgeToken, protocolVersion: 1 }) }
+      }
+      return null
+    },
+    documentElement: { dataset: {} }
+  }
+  globalThis.fetch = async (url, init = {}) => {
+    const requestUrl = String(url)
+    if (requestUrl === `http://127.0.0.1:17370/v1/captures/${captureId}/request`) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ captureId, sessionId, nonce, protocolVersion: 1, request: makeCaptureRequest() })
+      }
+    }
+    if (requestUrl === `http://127.0.0.1:17370/v1/captures/${captureId}/status`) {
+      statusPosts.push(JSON.parse(String(init.body || '{}')))
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true })
+      }
+    }
+    throw new Error(`Unexpected bridge HTTP request: ${requestUrl}`)
+  }
+  globalThis.chrome = {
+    runtime: {
+      onMessage: { addListener: () => {} },
+      sendMessage: (message, callback) => {
+        runtimeMessages.push(message)
+        if (message.type === 'AGENT_BRIDGE_HELLO') {
+          globalThis.chrome.runtime.lastError = lastError
+          callback?.(undefined)
+          delete globalThis.chrome.runtime.lastError
+          return
+        }
+        throw new Error('startAgentCapture must not run when hello transport fails')
+      },
+      connect: () => {
+        throw new Error('profile transfer port must not open when hello transport fails')
+      }
+    }
+  }
+
+  try {
+    await freshLoadTsModule('src/content/agent-bridge-client.ts')
+    await waitForCondition(() => statusPosts.length === 2, 'hello transport failure status')
+
+    assert.deepEqual(runtimeMessages.map(message => message.type), ['AGENT_BRIDGE_HELLO'])
+    assert.equal(statusPosts[0].status, 'waiting_extension')
+    assert.equal(statusPosts[1].status, 'failed')
+    assert.equal(statusPosts[1].phase, 'request_loaded')
+    assert.equal(statusPosts[1].error.code, 'EXTENSION_NOT_CONNECTED')
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window
+    else globalThis.window = originalWindow
+    if (originalDocument === undefined) delete globalThis.document
+    else globalThis.document = originalDocument
+    if (originalChrome === undefined) delete globalThis.chrome
+    else globalThis.chrome = originalChrome
+    if (originalLocation === undefined) delete globalThis.location
+    else globalThis.location = originalLocation
+    if (originalFetch === undefined) delete globalThis.fetch
+    else globalThis.fetch = originalFetch
+    resetLoadTsModuleCaches()
+  }
+})
+
+test('bridge client surfaces sendMessage lastError as bridge transport disconnected during start', async () => {
+  const originalWindow = globalThis.window
+  const originalDocument = globalThis.document
+  const originalChrome = globalThis.chrome
+  const originalLocation = globalThis.location
+  const originalFetch = globalThis.fetch
+  const { resetLoadTsModuleCaches, loadTsModule: freshLoadTsModule } = await import('./helpers/load-ts-module.mjs')
+  resetLoadTsModuleCaches()
+
+  const statusPosts = []
+  const runtimeMessages = []
+  const lastError = { message: 'Could not establish connection. Receiving end does not exist.' }
+  globalThis.location = new URL(bridgeUrl)
+  globalThis.window = {
+    addEventListener: () => {},
+    setInterval: () => {
+      throw new Error('control polling must not start when start sendMessage fails')
+    },
+    clearInterval: () => {}
+  }
+  globalThis.document = {
+    querySelector: selector => {
+      if (selector === 'meta[name="stackprism-agent-bridge"][content="1"]') return {}
+      if (selector === '#stackprism-agent-bridge-config[type="application/json"]') {
+        return { textContent: JSON.stringify({ captureId, sessionId, nonce, bridgeToken, protocolVersion: 1 }) }
+      }
+      return null
+    },
+    documentElement: { dataset: {} }
+  }
+  globalThis.fetch = async (url, init = {}) => {
+    const requestUrl = String(url)
+    if (requestUrl === `http://127.0.0.1:17370/v1/captures/${captureId}/request`) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ captureId, sessionId, nonce, protocolVersion: 1, request: makeCaptureRequest() })
+      }
+    }
+    if (requestUrl === `http://127.0.0.1:17370/v1/captures/${captureId}/status`) {
+      statusPosts.push(JSON.parse(String(init.body || '{}')))
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true })
+      }
+    }
+    throw new Error(`Unexpected bridge HTTP request: ${requestUrl}`)
+  }
+  globalThis.chrome = {
+    runtime: {
+      onMessage: { addListener: () => {} },
+      sendMessage: (message, callback) => {
+        runtimeMessages.push(message)
+        if (message.type === 'AGENT_BRIDGE_HELLO') {
+          callback?.({
+            ok: true,
+            data: {
+              extensionVersion: '1.3.71',
+              protocolVersion: 1,
+              capabilities: {
+                agentBridge: true,
+                siteExperienceProfileV1: true,
+                profileChunkTransport: true,
+                bridgeContentPost: true,
+                storageSession: true,
+                experienceProfiler: true,
+                rawProfile: true,
+                viewportMetadata: true,
+                visualScreenshot: true
+              }
+            }
+          })
+          return
+        }
+        if (message.type === 'START_AGENT_CAPTURE') {
+          globalThis.chrome.runtime.lastError = lastError
+          callback?.(undefined)
+          delete globalThis.chrome.runtime.lastError
+          return
+        }
+        throw new Error(`Unexpected runtime message: ${message.type}`)
+      },
+      connect: () => ({
+        postMessage: () => {},
+        onMessage: { addListener: () => {} },
+        onDisconnect: { addListener: () => {} }
+      })
+    }
+  }
+
+  try {
+    await freshLoadTsModule('src/content/agent-bridge-client.ts')
+    await waitForCondition(() => statusPosts.length === 3, 'start transport failure status')
+
+    assert.deepEqual(runtimeMessages.map(message => message.type), ['AGENT_BRIDGE_HELLO', 'START_AGENT_CAPTURE'])
+    assert.equal(statusPosts[0].status, 'waiting_extension')
+    assert.equal(statusPosts[1].status, 'running')
+    assert.equal(statusPosts[1].phase, 'target_opening')
+    assert.equal(statusPosts[2].status, 'failed')
+    assert.equal(statusPosts[2].phase, 'target_opening')
+    assert.equal(statusPosts[2].error.code, 'BRIDGE_TRANSPORT_DISCONNECTED')
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window
+    else globalThis.window = originalWindow
+    if (originalDocument === undefined) delete globalThis.document
+    else globalThis.document = originalDocument
+    if (originalChrome === undefined) delete globalThis.chrome
+    else globalThis.chrome = originalChrome
+    if (originalLocation === undefined) delete globalThis.location
+    else globalThis.location = originalLocation
+    if (originalFetch === undefined) delete globalThis.fetch
+    else globalThis.fetch = originalFetch
+    resetLoadTsModuleCaches()
+  }
+})

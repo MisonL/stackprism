@@ -1251,16 +1251,34 @@ test('python fallback bridge token can fetch request and post profile', async ()
       posted.body.preview.screenshot.downloadUrl
     )
 
-    const screenshotDownload = await readBytes(await fetch(downloaded.body.visualProfile.screenshot.downloadUrl))
+    const unauthenticatedScreenshotDownload = await readBytes(await fetch(downloaded.body.visualProfile.screenshot.downloadUrl))
+    assert.equal(unauthenticatedScreenshotDownload.status, 200)
+    assert.equal(unauthenticatedScreenshotDownload.headers.get('content-type'), 'image/jpeg')
+    assert.equal(unauthenticatedScreenshotDownload.body.toString('utf8'), 'fake-jpeg')
+
+    const screenshotDownload = await readBytes(
+      await fetch(downloaded.body.visualProfile.screenshot.downloadUrl, {
+        headers: { Authorization: `Bearer ${config.bridgeToken}` }
+      })
+    )
     assert.equal(screenshotDownload.status, 200)
     assert.equal(screenshotDownload.headers.get('content-type'), 'image/jpeg')
     assert.equal(screenshotDownload.headers.get('content-disposition'), `attachment; filename="stackprism-${created.body.id}-screenshot.jpg"`)
     assert.equal(screenshotDownload.body.toString('utf8'), 'fake-jpeg')
 
+    const apiScreenshotDownload = await readBytes(
+      await fetch(downloaded.body.visualProfile.screenshot.downloadUrl, {
+        headers: { Authorization: `Bearer ${ready.apiToken}` }
+      })
+    )
+    assert.equal(apiScreenshotDownload.status, 200)
+    assert.equal(apiScreenshotDownload.headers.get('content-type'), 'image/jpeg')
+    assert.equal(apiScreenshotDownload.body.toString('utf8'), 'fake-jpeg')
+
     const badScreenshotUrl = `${ready.baseUrl}/v1/captures/${created.body.id}/screenshot-download/shot_${'x'.repeat(43)}`
     const missingScreenshotAuth = await readJson(await fetch(badScreenshotUrl))
-    assert.equal(missingScreenshotAuth.status, 401)
-    assert.equal(missingScreenshotAuth.body.error.code, 'UNAUTHORIZED')
+    assert.equal(missingScreenshotAuth.status, 403)
+    assert.equal(missingScreenshotAuth.body.error.code, 'FORBIDDEN')
     const badScreenshotDownload = await readJson(
       await fetch(badScreenshotUrl, {
         headers: { Authorization: `Bearer ${config.bridgeToken}` }
@@ -1334,7 +1352,7 @@ test('python fallback status preview derives screenshot mime type from the data 
   }
 })
 
-test('python fallback profile reads and public screenshot downloads refresh result TTL', () => {
+test('python fallback profile reads and authenticated screenshot downloads refresh result TTL', () => {
   const parsed = pythonOneShot(`
 from stackprism_bridge_lib.server_factory import create_server
 import base64
@@ -1419,10 +1437,10 @@ try:
     profile_read = request("GET", f"{ready['baseUrl']}/v1/captures/{created['id']}/profile", ready["apiToken"])
     refreshed_expiry = capture["resultExpiresAt"]
     clock["now"] = first_expiry + 0.001
-    screenshot_read = request("GET", profile_read["body"]["visualProfile"]["screenshot"]["downloadUrl"])
+    screenshot_read = request("GET", profile_read["body"]["visualProfile"]["screenshot"]["downloadUrl"], config["bridgeToken"])
     after_screenshot_expiry = capture["resultExpiresAt"]
     clock["now"] = after_screenshot_expiry + 0.001
-    expired_screenshot = request("GET", profile_read["body"]["visualProfile"]["screenshot"]["downloadUrl"])
+    expired_screenshot = request("GET", profile_read["body"]["visualProfile"]["screenshot"]["downloadUrl"], config["bridgeToken"])
     screenshot = profile_read["body"]["visualProfile"]["screenshot"]
     visual_reference = profile_read["body"]["agentGuidance"]["recreationPlan"]["visualReference"]
     print(json.dumps({
@@ -2695,6 +2713,22 @@ test('python fallback rejects private, self-target, and cross-origin capture req
     )
     assert.equal(localhostSelfTarget.status, 400)
     assert.equal(localhostSelfTarget.body.error.code, 'BRIDGE_SELF_TARGET_BLOCKED')
+
+    for (const alias of ['2130706433', '127.1', '0x7f000001']) {
+      const aliasSelfTarget = await readJson(
+        await fetch(`${ready.baseUrl}/v1/captures`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${ready.apiToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...request,
+            url: ready.baseUrl.replace('127.0.0.1', alias),
+            options: { allowPrivateNetworkTarget: true }
+          })
+        })
+      )
+      assert.equal(aliasSelfTarget.status, 400, alias)
+      assert.equal(aliasSelfTarget.body.error.code, 'BRIDGE_SELF_TARGET_BLOCKED', alias)
+    }
 
     const selfTargetPath = await readJson(
       await fetch(`${ready.baseUrl}/v1/captures`, {
