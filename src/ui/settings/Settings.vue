@@ -283,6 +283,13 @@
   import { cleanCustomRules, cleanStringArray, defaultSettings, normalizeSettings } from '@/utils/normalize-settings'
   import { buildRuleContributionUrl } from '@/utils/build-issue-url'
   import {
+    loadAgentBridgeDataConsentSnapshot,
+    requestAgentBridgeDataConsent,
+    revokeAgentBridgeDataConsent,
+    rollbackAgentBridgeDataConsent,
+    type AgentBridgeDataConsentSnapshot
+  } from '@/utils/firefox-data-consent'
+  import {
     AGENT_BRIDGE_ALLOW_ALL_NETWORK_TARGETS_STORAGE_KEY,
     AGENT_BRIDGE_ENABLED_STORAGE_KEY,
     REPOSITORY_URL,
@@ -323,6 +330,8 @@
   const theme = ref<ThemeMode>('auto')
   const savedAgentBridgeEnabled = ref(false)
   const savedAgentBridgeAllowAllNetworkTargets = ref(false)
+  const savedAgentBridgeDataConsent = ref<AgentBridgeDataConsentSnapshot | null>(null)
+  const agentBridgeDataConsentBaseline = ref<AgentBridgeDataConsentSnapshot | null>(null)
   const confirmDialogPanel = ref<HTMLElement | null>(null)
   const settingsShell = ref<HTMLElement | null>(null)
   let statusTimer = 0
@@ -726,10 +735,13 @@
 
   const loadSettings = async () => {
     try {
-      const [stored, local] = await Promise.all([
-        chrome.storage.sync.get(SETTINGS_STORAGE_KEY),
-        chrome.storage.local.get(SETTINGS_STORAGE_KEY)
-      ])
+      const stored = await chrome.storage.sync.get(SETTINGS_STORAGE_KEY)
+      let local: Record<string, any> = {}
+      try {
+        local = await chrome.storage.local.get(SETTINGS_STORAGE_KEY)
+      } catch {
+        local = {}
+      }
       return normalizeSettings(
         {
           ...stored[SETTINGS_STORAGE_KEY],
@@ -902,11 +914,62 @@
     showStatus('规则 JSON 已格式化。', 'ok')
   }
 
+  const rollbackPendingAgentBridgeDataConsent = async (
+    snapshot: AgentBridgeDataConsentSnapshot | null,
+    consentWasRequested: boolean
+  ): Promise<boolean> => {
+    if (!consentWasRequested) return true
+    try {
+      const rolledBack = await rollbackAgentBridgeDataConsent(snapshot)
+      if (rolledBack) savedAgentBridgeDataConsent.value = snapshot
+      return true
+    } catch (error: any) {
+      showStatus(`保存已中止，但撤回浏览器数据许可失败：${error.message || error}`, 'error')
+      return false
+    }
+  }
+
+  const updateAgentBridgeDataConsentState = async (
+    snapshot: AgentBridgeDataConsentSnapshot | null,
+    baseline: AgentBridgeDataConsentSnapshot | null = snapshot
+  ): Promise<void> => {
+    savedAgentBridgeDataConsent.value = snapshot
+    agentBridgeDataConsentBaseline.value = baseline
+  }
+
+  const revokeDisabledAgentBridgeDataConsent = async (agentBridgeEnabled: boolean): Promise<boolean> => {
+    if (agentBridgeEnabled || !savedAgentBridgeEnabled.value) return true
+    try {
+      await revokeAgentBridgeDataConsent()
+      await updateAgentBridgeDataConsentState(await loadAgentBridgeDataConsentSnapshot())
+      return true
+    } catch (error: any) {
+      showStatus(`保存失败：撤回浏览器数据许可失败：${error.message || error}`, 'error')
+      return false
+    }
+  }
+
   const saveSettings = async () => {
     collectCategorySettings()
     const jsonRules = parseRulesJsonTextarea()
     if (!jsonRules) return
     const allowAllNetworkTargets = state.settings.agentBridgeEnabled && state.settings.agentBridgeAllowAllNetworkTargets
+    const consentSnapshot = savedAgentBridgeDataConsent.value
+    let agentBridgeDataConsentGranted = false
+    if (state.settings.agentBridgeEnabled) {
+      try {
+        agentBridgeDataConsentGranted = await requestAgentBridgeDataConsent()
+      } catch (error: any) {
+        if (await rollbackPendingAgentBridgeDataConsent(consentSnapshot, true)) {
+          showStatus(`保存失败：${error.message || error}`, 'error')
+        }
+        return
+      }
+      if (!agentBridgeDataConsentGranted) {
+        showStatus('已取消保存：浏览器未授予 Agent Bridge 数据传输许可。', 'error')
+        return
+      }
+    }
     if (allowAllNetworkTargets && !savedAgentBridgeAllowAllNetworkTargets.value) {
       const confirmed = await requestConfirmation({
         title: '放开所有网络目标？',
@@ -916,7 +979,9 @@
         tone: 'warning'
       })
       if (!confirmed) {
-        showStatus('已取消保存。', 'error')
+        if (await rollbackPendingAgentBridgeDataConsent(consentSnapshot, agentBridgeDataConsentGranted)) {
+          showStatus('已取消保存。', 'error')
+        }
         return
       }
     }
@@ -938,20 +1003,24 @@
       customCss: settings.customCss
     })
     try {
-      await Promise.all([
-        chrome.storage.sync.set({ [SETTINGS_STORAGE_KEY]: syncSettings }),
-        chrome.storage.local.set({
-          [SETTINGS_STORAGE_KEY]: {
-            [AGENT_BRIDGE_ENABLED_STORAGE_KEY]: settings.agentBridgeEnabled,
-            [AGENT_BRIDGE_ALLOW_ALL_NETWORK_TARGETS_STORAGE_KEY]: settings.agentBridgeAllowAllNetworkTargets
-          }
-        })
-      ])
+      if (!(await revokeDisabledAgentBridgeDataConsent(settings.agentBridgeEnabled))) return
+      await chrome.storage.sync.set({ [SETTINGS_STORAGE_KEY]: syncSettings })
+      await chrome.storage.local.set({
+        [SETTINGS_STORAGE_KEY]: {
+          [AGENT_BRIDGE_ENABLED_STORAGE_KEY]: settings.agentBridgeEnabled,
+          [AGENT_BRIDGE_ALLOW_ALL_NETWORK_TARGETS_STORAGE_KEY]: settings.agentBridgeAllowAllNetworkTargets
+        }
+      })
       applyLoadedSettings(settings)
+      if (agentBridgeDataConsentGranted) {
+        await updateAgentBridgeDataConsentState(await loadAgentBridgeDataConsentSnapshot(), consentSnapshot)
+      }
       applyCustomCss(settings.customCss)
       showStatus('设置已保存。重新打开或刷新插件弹窗后生效。', 'ok')
     } catch (error: any) {
-      showStatus(`保存失败：${error.message || error}`, 'error')
+      if (await rollbackPendingAgentBridgeDataConsent(consentSnapshot, agentBridgeDataConsentGranted)) {
+        showStatus(`保存失败：${error.message || error}`, 'error')
+      }
     }
   }
 
@@ -972,6 +1041,11 @@
       customCss: state.settings.customCss
     })
     try {
+      const consentSnapshot = agentBridgeDataConsentBaseline.value
+      if (consentSnapshot?.supported) {
+        await rollbackAgentBridgeDataConsent(consentSnapshot)
+        await updateAgentBridgeDataConsentState(await loadAgentBridgeDataConsentSnapshot())
+      }
       await Promise.all([
         chrome.storage.sync.set({ [SETTINGS_STORAGE_KEY]: syncDefaults }),
         chrome.storage.local.remove(SETTINGS_STORAGE_KEY)
@@ -1014,6 +1088,7 @@
     version.value = chrome.runtime.getManifest?.()?.version || ''
     theme.value = await getStoredTheme()
     applyLoadedSettings(await loadSettings())
+    await updateAgentBridgeDataConsentState(await loadAgentBridgeDataConsentSnapshot())
     applyCustomCss(state.settings.customCss)
   })
 </script>
