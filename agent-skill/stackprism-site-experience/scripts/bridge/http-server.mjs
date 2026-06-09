@@ -126,14 +126,13 @@ export const createBridgeServer = ({ port = 0, env = process.env, resolveHostnam
     const { capture, endpoint, screenshotDownloadId } = routed
     const rejectedOrigin = rejectCrossOriginSensitiveRequest(req, res, baseUrl)
     if (rejectedOrigin) return rejectedOrigin
-    const publicScreenshotRead =
-      req.method === 'GET' &&
-      endpoint === 'screenshot-download' &&
-      isValidId('screenshotDownloadId', screenshotDownloadId) &&
-      safeEqual(screenshotDownloadId, capture.screenshotDownloadId)
-    const allowed = publicScreenshotRead
-      ? { ok: true, tokenType: 'screenshot' }
-      : auth(req, capture, apiToken, scopeForEndpoint(req.method, endpoint))
+    if (req.method === 'GET' && endpoint === 'screenshot-download') {
+      if (!isValidId('screenshotDownloadId', screenshotDownloadId) || !safeEqual(screenshotDownloadId, capture.screenshotDownloadId)) {
+        return fail(res, 403, 'FORBIDDEN', 'Screenshot download URL is not valid for this capture.', {}, profileHeaders)
+      }
+      return readScreenshotDownload(res, capture, profileHeaders, { store })
+    }
+    const allowed = auth(req, capture, apiToken, scopeForEndpoint(req.method, endpoint))
     if (!allowed.ok) return fail(res, allowed.status, allowed.code, allowed.message)
     if (
       allowed.tokenType === 'api' &&
@@ -166,10 +165,6 @@ export const createBridgeServer = ({ port = 0, env = process.env, resolveHostnam
     }
     if (req.method === 'GET' && endpoint === 'profile-download') {
       return readProfileDownload(res, capture, profileHeaders, { store })
-    }
-    if (req.method === 'GET' && endpoint === 'screenshot-download') {
-      if (!publicScreenshotRead) return fail(res, 403, 'FORBIDDEN', 'Screenshot download URL is not valid for this capture.', {}, profileHeaders)
-      return readScreenshotDownload(res, capture, profileHeaders, { store })
     }
     if (req.method === 'POST' && endpoint === 'status') {
       const parsed = await readJson(req, 5 * 1024 * 1024, policy.requestTimeoutMs)

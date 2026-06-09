@@ -116,10 +116,7 @@ class BridgeHandler(BaseBridgeHandler):
             get_profile_download(self, capture)
             return
         if endpoint == "screenshot-download":
-            public_screenshot_read = valid_id("screenshotDownloadId", screenshot_download_id) and safe_equal(screenshot_download_id, capture.get("screenshotDownloadId"))
-            if not public_screenshot_read:
-                if not self.auth_capture(capture, "download"):
-                    return
+            if not (valid_id("screenshotDownloadId", screenshot_download_id) and safe_equal(screenshot_download_id, capture.get("screenshotDownloadId"))):
                 self.fail(403, "FORBIDDEN", "Screenshot download URL is not valid for this capture.", extra_headers={"Referrer-Policy": "no-referrer"})
                 return
             get_screenshot_download(self, capture, require_auth=False)

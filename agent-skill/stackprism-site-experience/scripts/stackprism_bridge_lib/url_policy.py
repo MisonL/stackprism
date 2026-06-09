@@ -48,34 +48,38 @@ def is_strict_int(value):
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def is_private_host(hostname):
-    if hostname == "localhost":
-        return True
+def parse_ip_address(hostname):
+    host = (hostname or "").strip("[]")
     try:
-        address = ipaddress.ip_address(hostname.strip("[]"))
-        if getattr(address, "ipv4_mapped", None):
-            address = address.ipv4_mapped
-        return any(address in network for network in PRIVATE_IP_NETWORKS) and not any(address in network for network in PUBLIC_IP_EXCEPTIONS)
+        address = ipaddress.ip_address(host)
     except ValueError:
+        try:
+            address = ipaddress.ip_address(socket.inet_aton(host))
+        except OSError:
+            return None
+    if getattr(address, "ipv4_mapped", None):
+        address = address.ipv4_mapped
+    return address
+
+
+def is_private_host(hostname):
+    if (hostname or "").strip("[]").lower() == "localhost":
+        return True
+    address = parse_ip_address(hostname)
+    if address is None:
         return False
+    return any(address in network for network in PRIVATE_IP_NETWORKS) and not any(address in network for network in PUBLIC_IP_EXCEPTIONS)
 
 
 def is_proxy_reserved_host(hostname):
-    try:
-        address = ipaddress.ip_address(hostname.strip("[]"))
-        if getattr(address, "ipv4_mapped", None):
-            address = address.ipv4_mapped
-        return any(address in network for network in PROXY_RESERVED_IP_NETWORKS)
-    except ValueError:
+    address = parse_ip_address(hostname)
+    if address is None:
         return False
+    return any(address in network for network in PROXY_RESERVED_IP_NETWORKS)
 
 
 def is_ip_literal(hostname):
-    try:
-        ipaddress.ip_address(hostname.strip("[]"))
-        return True
-    except ValueError:
-        return False
+    return parse_ip_address(hostname) is not None
 
 
 def default_resolve_hostname(hostname):
@@ -176,7 +180,10 @@ def is_bridge_loopback_alias(hostname, bridge_hostname):
         return True
     if bridge_host != "127.0.0.1":
         return False
-    return host in {"localhost", "::1", "0:0:0:0:0:0:0:1"}
+    if host in {"localhost", "::1", "0:0:0:0:0:0:0:1"}:
+        return True
+    address = parse_ip_address(host)
+    return bool(address and str(address) == "127.0.0.1")
 
 
 def is_bridge_origin(parsed, bridge_origin):
