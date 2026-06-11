@@ -12,11 +12,11 @@ Paths in this package are relative to the StackPrism repository root. If an agen
 - `scripts/stackprism-bridge.mjs`: JavaScript loopback bridge, preferred.
 - `scripts/stackprism_bridge.py`: Python standard-library fallback.
 
-Both scripts print a single ready JSON line to stdout after the HTTP server is bound. Logs and startup errors go to stderr.
+The direct bridge scripts print a single ready JSON line to stdout after the HTTP server is bound. Logs and startup errors go to stderr.
 
 Use `capture-site.mjs` for ordinary agent work. Use `stackprism-bridge.mjs` or the Python fallback directly only for protocol debugging or custom orchestration.
 
-`capture-site.mjs` bounds each bridge API request with `--request-timeout-ms`, defaulting to 30000 ms, so a stalled local bridge fails explicitly instead of hanging the calling agent.
+`capture-site.mjs` prints one JSON summary to stdout on success and one JSON error object to stderr on failure. It bounds each bridge API request with `--request-timeout-ms`, defaulting to 30000 ms, so a stalled local bridge fails explicitly instead of hanging the calling agent. It also accepts `--include tech,visual,layout,components,interaction,ux,assets` and `--max-resource-urls <n>` so retry attempts can reduce profile size without editing scripts.
 
 The bridge page opened in the browser becomes a result workbench after completion: target URL, screenshot preview, enlarged screenshot preview, screenshot download/copy, one-click Markdown summary, and grouped profile content cards. The page reads only the status preview with its one-capture `bridgeToken`; raw `/profile` still requires the API token.
 

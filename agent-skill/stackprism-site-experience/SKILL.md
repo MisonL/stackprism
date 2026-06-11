@@ -1,6 +1,6 @@
 ---
 name: stackprism-site-experience
-description: Use when an AI agent must capture a StackPrism Agent Bridge profile from a specific http(s) URL for browser-observed evidence, website recreation, UX comparison, or live fact verification. Do not use for generic UI edits, backend-only work, web search, or StackPrism internal code review unless a target URL profile capture is required.
+description: Use when an AI agent must capture a StackPrism Agent Bridge profile from a specific http(s) URL for browser-observed evidence, website recreation, UX comparison, live fact verification, or Agent Bridge E2E verification. Do not use for generic UI edits, backend-only work, web search, or StackPrism internal code review unless a target URL profile capture is required.
 ---
 
 # StackPrism Site Experience
@@ -36,12 +36,13 @@ node agent-skill/stackprism-site-experience/scripts/capture-site.mjs \
   --url https://target.example \
   --out /tmp/stackprism-profile.json \
   --result-out /tmp/stackprism-result.json \
-  --screenshot-out /tmp/stackprism-screenshot.jpg
+  --screenshot-out /tmp/stackprism-screenshot.jpg \
+  --include tech,visual,layout,components,interaction,ux,assets
 ```
 
 Set `STACKPRISM_BROWSER_OPEN_COMMAND` and `STACKPRISM_BROWSER_OPEN_ARGS_JSON` only when the default opener is not the browser/profile with StackPrism installed. On macOS, for example, use `STACKPRISM_BROWSER_OPEN_COMMAND=open` and `STACKPRISM_BROWSER_OPEN_ARGS_JSON='["-a","Google Chrome"]'` to force Chrome.
 
-The helper prints one JSON summary on stdout. `screenshotPresent` means the profile contains screenshot evidence; `screenshotWritten` means the screenshot image was written to `screenshotPath` and can be opened by image-capable coding tools. If `--screenshot-out` is omitted, the helper writes a sidecar image next to `--out` and rewrites the Profile screenshot reference to that local file URL before saving the JSON.
+The helper prints one JSON summary on stdout. On failure it writes one JSON error object to stderr with `error.code`, `error.message`, and sanitized `error.details`. `screenshotPresent` means the profile contains screenshot evidence; `screenshotWritten` means the screenshot image was written to `screenshotPath` and can be opened by image-capable coding tools. If `--screenshot-out` is omitted, the helper writes a sidecar image next to `--out` and rewrites the Profile screenshot reference to that local file URL before saving the JSON.
 
 Reference files are available for deeper consumption details. Read `references/site-experience-profile-schema.md` when implementing or validating Profile schema handling, and read `references/agent-consumption-guide.md` when translating a captured Profile into a target UI or app implementation.
 
@@ -125,7 +126,7 @@ Then poll `GET /v1/captures/{id}` and read `GET /v1/captures/{id}/profile` when 
 
 If the consuming model can read images, set `"captureScreenshot": true` with `include` containing `"visual"`. Chrome may capture the visible target viewport and the saved Profile will expose it as `visualProfile.screenshot.downloadUrl`, not as embedded base64. To inspect actual visual appearance, download or open that image. When using `capture-site.mjs`, the helper downloads the image while the bridge is still alive and rewrites `downloadUrl` to a local `file://` URL plus `localPath`; this remains available after the bridge exits as long as the file is not moved or deleted. When reading directly from the live bridge API or manually downloading from the bridge page, the screenshot URL is a temporary `127.0.0.1` endpoint and must be used before the local bridge exits or the capture result expires. The screenshot is not text-redacted pixel by pixel, so do not request it for login-protected or private user pages.
 
-Large pages can produce multi-chunk profile transfers. If the browser extension reports `BRIDGE_TRANSPORT_DISCONNECTED`, `PROFILE_TRANSPORT_FAILED`, `PROFILE_CHUNK_MISSING`, or `CAPTURE_TIMEOUT`, treat the capture as failed, stop the bridge child process, start a new bridge, and retry once with a smaller `include` set or lower `maxResourceUrls`. Do not synthesize a profile from partial chunks.
+Large pages can produce multi-chunk profile transfers. If the browser extension reports `BRIDGE_TRANSPORT_DISCONNECTED`, `PROFILE_TRANSPORT_FAILED`, `PROFILE_CHUNK_MISSING`, or `CAPTURE_TIMEOUT`, treat the capture as failed, stop the bridge child process, start a new bridge, and retry once with a smaller `--include` set or lower `--max-resource-urls`. For example, use `--include tech,visual,layout,components,ux` before dropping visual evidence entirely. Do not synthesize a profile from partial chunks.
 
 Handle user-actionable failures explicitly:
 
@@ -135,6 +136,7 @@ Handle user-actionable failures explicitly:
 
 ## Use The Profile
 
+- Read `limitations` first. Do not infer that a missing section means the site lacks that feature.
 - Start from `agentGuidance.recreationPlan`. Follow its `implementationOrder`, then map `designTokens`, `layoutBlueprint`, `componentInventory`, `interactionChecklist`, `uxChecklist`, `assetHints`, `visualReference`, and `verificationChecklist` into the target project.
 - Use `visualProfile.screenshot.downloadUrl` as an optional visual reference only when it is present and your model supports image input. The Profile JSON intentionally omits screenshot base64; download or open the image to see the actual visual effect, and do not use screenshots from login-protected or private pages because pixels are not redacted.
 - Treat `techProfile` as implementation guidance, not a mandate to copy the source site's private stack.

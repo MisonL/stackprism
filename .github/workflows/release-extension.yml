@@ -67,7 +67,7 @@ jobs:
 
           node --input-type=module <<'NODE'
           import { readdirSync, readFileSync, statSync } from 'node:fs'
-          import { join, relative } from 'node:path'
+          import { basename, join, relative } from 'node:path'
 
           const root = 'dist'
           const manifest = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'))
@@ -75,6 +75,10 @@ jobs:
           const agentOnlySourceFiles = [
             'stackprism-bridge.mjs',
             'stackprism_bridge.py',
+            'capture-site.mjs',
+            'capture-site-args.mjs',
+            'capture-runtime.mjs',
+            'capture-screenshot-artifact.mjs',
             'capture-store.mjs',
             'http-handlers.mjs',
             'http-server.mjs',
@@ -83,11 +87,14 @@ jobs:
             'security.mjs',
             'url-policy.mjs'
           ]
+          const agentOnlySourceFileSet = new Set(agentOnlySourceFiles)
           const agentOnlyPathPatterns = [
             /(?:^|\/)agent-skill(?:\/|$)/,
             /(?:^|\/)docs\/superpowers(?:\/|$)/,
             /(?:^|\/)tests(?:\/|$)/
           ]
+          const pathBasename = value => basename(String(value || '').replaceAll('\\', '/'))
+          const isAgentOnlySourcePath = path => agentOnlySourceFileSet.has(pathBasename(path))
 
           if (Object.prototype.hasOwnProperty.call(manifest, 'externally_connectable')) {
             failures.push('dist/manifest.json must not expose externally_connectable')
@@ -97,7 +104,7 @@ jobs:
             for (const path of resource.resources || []) {
               if (
                 agentOnlyPathPatterns.some(pattern => pattern.test(path)) ||
-                agentOnlySourceFiles.some(file => path.includes(file)) ||
+                isAgentOnlySourcePath(path) ||
                 path.includes('experience-profiler.iife.js')
               ) {
                 failures.push(`web_accessible_resources exposes agent-only path: ${path}`)
@@ -108,8 +115,7 @@ jobs:
           const disallowed = [
             ...agentOnlyPathPatterns,
             /(?:^|\/)__pycache__(?:\/|$)/,
-            /\.py[co]?$/,
-            ...agentOnlySourceFiles.map(file => new RegExp(`${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`))
+            /\.py[co]?$/
           ]
 
           const walk = dir => {
@@ -120,7 +126,7 @@ jobs:
                 walk(full)
                 continue
               }
-              if (disallowed.some(pattern => pattern.test(rel))) {
+              if (disallowed.some(pattern => pattern.test(rel)) || isAgentOnlySourcePath(rel)) {
                 failures.push(`dist contains agent-only or test artifact: ${rel}`)
               }
             }

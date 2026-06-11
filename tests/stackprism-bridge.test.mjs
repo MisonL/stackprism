@@ -18,7 +18,10 @@ import {
   resolveBrowserOpenCommand
 } from '../agent-skill/stackprism-site-experience/scripts/bridge/open-browser.mjs'
 import { htmlEscapeScriptJson, isValidId, safeEqual } from '../agent-skill/stackprism-site-experience/scripts/bridge/protocol.mjs'
-import { readJson as readBridgeRequestJson, rejectBadRequestShell } from '../agent-skill/stackprism-site-experience/scripts/bridge/security.mjs'
+import {
+  readJson as readBridgeRequestJson,
+  rejectBadRequestShell
+} from '../agent-skill/stackprism-site-experience/scripts/bridge/security.mjs'
 import { normalizeCaptureRequest } from '../agent-skill/stackprism-site-experience/scripts/bridge/url-policy.mjs'
 import { parseTerminalSettleMs } from '../agent-skill/stackprism-site-experience/scripts/capture-runtime.mjs'
 import identifiers from './fixtures/bridge-protocol-identifiers.json' with { type: 'json' }
@@ -43,7 +46,11 @@ const baseCaptureRequest = {
 const auth = token => ({ Authorization: `Bearer ${token}` })
 
 const readJson = async response => ({ status: response.status, body: await response.json(), headers: response.headers })
-const readBytes = async response => ({ status: response.status, body: Buffer.from(await response.arrayBuffer()), headers: response.headers })
+const readBytes = async response => ({
+  status: response.status,
+  body: Buffer.from(await response.arrayBuffer()),
+  headers: response.headers
+})
 
 const createClassList = () => {
   const values = new Set()
@@ -441,7 +448,8 @@ test('settings page revokes browser data consent before saving Agent Bridge disa
   assert.match(settings.slice(helperStart, saveStart), /await revokeAgentBridgeDataConsent\(\)/)
   assert.match(saveSection, /if \(!\(await revokeDisabledAgentBridgeDataConsent\(settings\.agentBridgeEnabled\)\)\) return/)
   assert.ok(
-    saveSection.indexOf('await revokeDisabledAgentBridgeDataConsent(settings.agentBridgeEnabled)') < saveSection.indexOf('chrome.storage.sync.set'),
+    saveSection.indexOf('await revokeDisabledAgentBridgeDataConsent(settings.agentBridgeEnabled)') <
+      saveSection.indexOf('chrome.storage.sync.set'),
     'settings save must revoke browser data consent before writing disabled Agent Bridge state'
   )
 })
@@ -523,18 +531,37 @@ test('bridge page script supports profile download, screenshot actions and modal
   assert.equal(elements.modalCopyStatus.textContent, '已复制截图。')
 
   document.activeElement = elements.bridgeCard
-  const tabFromOutside = { key: 'Tab', preventDefaultCalled: false, preventDefault() { this.preventDefaultCalled = true } }
+  const tabFromOutside = {
+    key: 'Tab',
+    preventDefaultCalled: false,
+    preventDefault() {
+      this.preventDefaultCalled = true
+    }
+  }
   document.listeners.keydown(tabFromOutside)
   assert.equal(tabFromOutside.preventDefaultCalled, true)
   assert.equal(document.activeElement, elements.modalCopyScreenshot)
 
   document.activeElement = elements.modalClose
-  const tabForward = { key: 'Tab', preventDefaultCalled: false, preventDefault() { this.preventDefaultCalled = true } }
+  const tabForward = {
+    key: 'Tab',
+    preventDefaultCalled: false,
+    preventDefault() {
+      this.preventDefaultCalled = true
+    }
+  }
   document.listeners.keydown(tabForward)
   assert.equal(tabForward.preventDefaultCalled, true)
   assert.equal(document.activeElement, elements.modalCopyScreenshot)
 
-  const tabBackward = { key: 'Tab', shiftKey: true, preventDefaultCalled: false, preventDefault() { this.preventDefaultCalled = true } }
+  const tabBackward = {
+    key: 'Tab',
+    shiftKey: true,
+    preventDefaultCalled: false,
+    preventDefault() {
+      this.preventDefaultCalled = true
+    }
+  }
   document.listeners.keydown(tabBackward)
   assert.equal(tabBackward.preventDefaultCalled, true)
   assert.equal(document.activeElement, elements.modalClose)
@@ -828,10 +855,7 @@ test('js bridge protocol helpers use strict token comparison and script-safe JSO
 })
 
 test('js bridge page renderer validates nonce and script-escapes object config', () => {
-  assert.throws(
-    () => renderBridgePageHtml('bad" nonce', { value: 'https://example.com/' }),
-    /INVALID_CSP_NONCE/
-  )
+  assert.throws(() => renderBridgePageHtml('bad" nonce', { value: 'https://example.com/' }), /INVALID_CSP_NONCE/)
 
   const html = renderBridgePageHtml('abcdefghijklmnopqrstuv', {
     value: '</script><script>alert(1)</script>&\u2028\u2029'
@@ -963,7 +987,10 @@ test('bridge page renders bridge token once with hardened headers', async () => 
     assert.match(html, /id="bridgeCard" class="bridge-card" data-status="waiting_extension" aria-labelledby="bridge-title" tabindex="-1"/)
     assert.match(html, /id="progressBar"/)
     assert.match(html, /id="targetUrl" class="target-url" title="" target="_blank" rel="noopener noreferrer" aria-disabled="true"/)
-    assert.match(html, /id="openTargetUrl" class="preview-button target-open-link" target="_blank" rel="noopener noreferrer" aria-disabled="true" tabindex="-1"/)
+    assert.match(
+      html,
+      /id="openTargetUrl" class="preview-button target-open-link" target="_blank" rel="noopener noreferrer" aria-disabled="true" tabindex="-1"/
+    )
     assert.match(html, /id="targetScreenshot"/)
     assert.match(html, /id="targetScreenshot" alt=""/)
     assert.match(html, /id="screenshotMeta"/)
@@ -978,10 +1005,7 @@ test('bridge page renders bridge token once with hardened headers', async () => 
     assert.match(html, /id="screenshotStateBadge" class="state-chip" data-state="pending"/)
     assert.match(html, /id="screenshotEmpty"/)
     assert.match(html, /id="stepSummary" class="step-summary" role="status" aria-live="polite"/)
-    assert.match(
-      html,
-      /id="toggleSteps" class="flow-toggle" type="button" aria-controls="captureSteps" aria-expanded="false"/,
-    )
+    assert.match(html, /id="toggleSteps" class="flow-toggle" type="button" aria-controls="captureSteps" aria-expanded="false"/)
     assert.match(html, /<ol id="captureSteps" class="steps" aria-label="采集步骤" role="list">/)
     assert.match(html, /data-phase="bridge_connected" aria-current="step"/)
     assert.match(html, /id="profileContentSection"/)
@@ -1042,7 +1066,10 @@ test('bridge page renders bridge token once with hardened headers', async () => 
     assert.match(html, /\.target-url\[href\]\{cursor:pointer\}/)
     assert.match(html, /\.target-url\[href\]:hover\{text-decoration:underline/)
     assert.match(html, /\.target-actions\{display:flex;min-width:0;flex-wrap:wrap;gap:10px;justify-content:flex-end\}/)
-    assert.match(html, /\.target-open-link\{min-width:132px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none\}/)
+    assert.match(
+      html,
+      /\.target-open-link\{min-width:132px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none\}/
+    )
     assert.match(html, /\.preview-button:disabled,.modal-close:disabled,.preview-button\[aria-disabled="true"\]\{cursor:not-allowed/)
     assert.match(html, /targetHrefFor=value=>/)
     assert.match(html, /url\.pathname\.includes\('\[redacted\]'\)/)
@@ -1065,7 +1092,7 @@ test('bridge page renders bridge token once with hardened headers', async () => 
     assert.match(html, /addEventListener\('click',\(\)=>setStepsOpen\(!stepsOpen,true\)\)/)
     assert.match(
       html,
-      /\.preview-button:disabled,.modal-close:disabled,.preview-button\[aria-disabled="true"\]\{cursor:not-allowed;opacity:1;background:#f7fbfa/,
+      /\.preview-button:disabled,.modal-close:disabled,.preview-button\[aria-disabled="true"\]\{cursor:not-allowed;opacity:1;background:#f7fbfa/
     )
     assert.match(html, /setCopyStatus\(modalOpen\(\)\?el\.modalCopyStatus:el\.copyStatus,value,type\)/)
     assert.match(html, /const restore=el\.screenshotFrame\.disabled\?el\.bridgeCard:el\.screenshotFrame/)
@@ -1447,7 +1474,10 @@ test('bridge token can fetch request and post profile but cannot read profile', 
     )
     assert.equal(screenshotDownload.status, 200)
     assert.equal(screenshotDownload.headers.get('content-type'), 'image/jpeg')
-    assert.equal(screenshotDownload.headers.get('content-disposition'), `attachment; filename="stackprism-${created.body.id}-screenshot.jpg"`)
+    assert.equal(
+      screenshotDownload.headers.get('content-disposition'),
+      `attachment; filename="stackprism-${created.body.id}-screenshot.jpg"`
+    )
     assert.equal(screenshotDownload.body.toString('utf8'), 'fake-jpeg')
 
     const apiScreenshotDownload = await readBytes(
@@ -1547,14 +1577,18 @@ test('profile reads and authenticated screenshot downloads refresh result TTL', 
       const firstExpiry = capture.resultExpiresAt
 
       now = firstExpiry - 1
-      const profileRead = await readJson(await fetch(`${ready.baseUrl}/v1/captures/${created.body.id}/profile`, { headers: auth(ready.apiToken) }))
+      const profileRead = await readJson(
+        await fetch(`${ready.baseUrl}/v1/captures/${created.body.id}/profile`, { headers: auth(ready.apiToken) })
+      )
       assert.equal(profileRead.status, 200)
       assert.equal(profileRead.body.visualProfile.screenshot.dataUrl, undefined)
       assert.equal(capture.resultExpiresAt, now + 100)
       assert.ok(capture.resultExpiresAt > firstExpiry)
 
       now = firstExpiry + 1
-      const screenshot = await readBytes(await fetch(profileRead.body.visualProfile.screenshot.downloadUrl, { headers: auth(config.bridgeToken) }))
+      const screenshot = await readBytes(
+        await fetch(profileRead.body.visualProfile.screenshot.downloadUrl, { headers: auth(config.bridgeToken) })
+      )
       assert.equal(screenshot.status, 200)
       assert.equal(screenshot.headers.get('content-type'), 'image/png')
       assert.equal(screenshot.body.toString('utf8'), 'fake-png')
@@ -1564,7 +1598,9 @@ test('profile reads and authenticated screenshot downloads refresh result TTL', 
       assert.ok(capture.resultExpiresAt > firstExpiry + 99)
 
       now = capture.resultExpiresAt + 1
-      const expiredScreenshot = await readJson(await fetch(profileRead.body.visualProfile.screenshot.downloadUrl, { headers: auth(config.bridgeToken) }))
+      const expiredScreenshot = await readJson(
+        await fetch(profileRead.body.visualProfile.screenshot.downloadUrl, { headers: auth(config.bridgeToken) })
+      )
       assert.equal(expiredScreenshot.status, 410)
       assert.equal(expiredScreenshot.body.error.code, 'CAPTURE_RESULT_EXPIRED')
       assert.equal(capture.profile, null)
@@ -2054,12 +2090,16 @@ test('bridge cli rejects occupied configured port before ready output', async ()
 })
 
 test('bridge cli startup failure code is part of the bridge error contract', async () => {
-  const { isKnownBridgeErrorCode, sanitizeBridgeError } = await import('../agent-skill/stackprism-site-experience/scripts/bridge/protocol.mjs')
+  const { isKnownBridgeErrorCode, sanitizeBridgeError } =
+    await import('../agent-skill/stackprism-site-experience/scripts/bridge/protocol.mjs')
 
   assert.equal(isKnownBridgeErrorCode('BRIDGE_START_FAILED'), true)
   assert.equal(isKnownBridgeErrorCode('BRIDGE_PAGE_RENDER_FAILED'), true)
   assert.equal(sanitizeBridgeError({ code: 'BRIDGE_START_FAILED', message: 'Bridge server startup failed.' }).code, 'BRIDGE_START_FAILED')
-  assert.equal(sanitizeBridgeError({ code: 'BRIDGE_PAGE_RENDER_FAILED', message: 'Bridge page render failed.' }).code, 'BRIDGE_PAGE_RENDER_FAILED')
+  assert.equal(
+    sanitizeBridgeError({ code: 'BRIDGE_PAGE_RENDER_FAILED', message: 'Bridge page render failed.' }).code,
+    'BRIDGE_PAGE_RENDER_FAILED'
+  )
   const sanitized = sanitizeBridgeError({
     code: 'INVALID_REQUEST',
     message: `screenshot shot_${'a'.repeat(43)} failed`,
@@ -2134,6 +2174,94 @@ test('capture-site helper terminal settle parser defaults invalid nullable value
   assert.equal(parseTerminalSettleMs('5000'), 5000)
   assert.equal(parseTerminalSettleMs('5001'), 3000)
   assert.equal(parseTerminalSettleMs('invalid'), 3000)
+})
+
+test('capture-site helper emits one machine-readable argument error', async () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'stackprism-capture-site-args-'))
+  const profilePath = join(tempDir, 'profile.json')
+
+  try {
+    const child = spawn(
+      process.execPath,
+      [
+        'agent-skill/stackprism-site-experience/scripts/capture-site.mjs',
+        '--url',
+        'https://example.test/',
+        '--out',
+        profilePath,
+        '--include',
+        'tech,unknown'
+      ],
+      {
+        cwd: new URL('..', import.meta.url),
+        stdio: ['ignore', 'pipe', 'pipe']
+      }
+    )
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', chunk => {
+      stdout += String(chunk)
+    })
+    child.stderr.on('data', chunk => {
+      stderr += String(chunk)
+    })
+    const [code] = await once(child, 'exit')
+    const lines = stderr.trim().split('\n')
+    const parsed = JSON.parse(stderr.trim())
+
+    assert.notEqual(code, 0)
+    assert.equal(stdout.trim(), '')
+    assert.equal(lines.length, 1)
+    assert.equal(parsed.ok, false)
+    assert.equal(parsed.error.code, 'INVALID_REQUEST')
+    assert.match(parsed.error.message, /--include/)
+    assert.match(parsed.error.details.usage, /Usage: node agent-skill\/stackprism-site-experience\/scripts\/capture-site\.mjs/)
+    assert.match(parsed.error.details.usage, /--no-screenshot/)
+    assert.doesNotMatch(stderr, /^Usage:/)
+    assert.equal(existsSync(profilePath), false)
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true })
+  }
+})
+
+test('capture-site helper preserves PORT_IN_USE startup errors', async () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'stackprism-capture-site-port-'))
+  const profilePath = join(tempDir, 'profile.json')
+  const occupied = net.createServer()
+  occupied.listen(0, '127.0.0.1')
+  await once(occupied, 'listening')
+  const { port } = occupied.address()
+
+  try {
+    const child = spawn(
+      process.execPath,
+      ['agent-skill/stackprism-site-experience/scripts/capture-site.mjs', '--url', 'https://example.test/', '--out', profilePath],
+      {
+        cwd: new URL('..', import.meta.url),
+        env: { ...process.env, STACKPRISM_BRIDGE_PORT: String(port) },
+        stdio: ['ignore', 'pipe', 'pipe']
+      }
+    )
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', chunk => {
+      stdout += String(chunk)
+    })
+    child.stderr.on('data', chunk => {
+      stderr += String(chunk)
+    })
+    const [code] = await once(child, 'exit')
+    const parsed = JSON.parse(stderr.trim())
+
+    assert.notEqual(code, 0)
+    assert.equal(stdout.trim(), '')
+    assert.equal(parsed.error.code, 'PORT_IN_USE')
+    assert.match(parsed.error.message, /port is already in use/i)
+    assert.equal(existsSync(profilePath), false)
+  } finally {
+    await new Promise(resolve => occupied.close(resolve))
+    rmSync(tempDir, { recursive: true, force: true })
+  }
 })
 
 test('capture-site helper keeps bridge stdin open and writes profile artifacts', async () => {
@@ -2292,8 +2420,10 @@ process.stdin.resume()
     assert.equal(summary.screenshotPresent, true)
     assert.equal(summary.screenshotWritten, true)
     assert.equal(summary.profileDownloadReady, true)
+    assert.equal(summary.captureScreenshot, true)
     assert.equal(result.techCount, 2)
     assert.equal(result.screenshotWritten, true)
+    assert.equal(result.captureScreenshot, true)
     assert.equal(result.screenshotPath, screenshotPath)
     assert.equal(result.screenshotDownloadUrl, pathToFileURL(screenshotPath).href)
     assert.equal(result.profileDownloadReady, true)
@@ -2314,12 +2444,111 @@ process.stdin.resume()
     assert.equal(fakeBridgeLog.requestBody.options.forceRefresh, false)
     assert.equal(fakeBridgeLog.requestBody.options.captureScreenshot, true)
     assert.equal(fakeBridgeLog.requestBody.options.allowPrivateNetworkTarget, false)
+    assert.deepEqual(fakeBridgeLog.requestBody.include, ['tech', 'visual', 'layout', 'components', 'interaction', 'ux', 'assets'])
     assert.equal(fakeBridgeLog.statusReads >= 2, true)
     assert.equal(fakeBridgeLog.profileDownloadedAt > 0, true)
     assert.equal(fakeBridgeLog.screenshotDownloadedAt > 0, true)
     assert.equal(fakeBridgeLog.screenshotDownloadedAt >= fakeBridgeLog.profileDownloadedAt, true)
     assert.equal(fakeBridgeLog.stdinEndedAt >= fakeBridgeLog.screenshotDownloadedAt, true)
     assert.equal(fakeBridgeLog.stdinEndedAt - fakeBridgeLog.completedAt >= 40, true)
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true })
+  }
+})
+
+test('capture-site helper accepts a reduced include set for retry captures', async () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'stackprism-capture-site-include-'))
+  const fakeBridgePath = join(tempDir, 'fake-bridge-include.mjs')
+  const profilePath = join(tempDir, 'profile.json')
+  const logPath = join(tempDir, 'fake-bridge-log.json')
+  const fakeProfile = profileFor('pending', {
+    target: { url: 'https://example.test/', finalUrl: 'https://example.test/final', language: 'en' },
+    techProfile: { technologies: [] },
+    agentGuidance: { recreationPlan: { implementationOrder: ['layout'] } }
+  })
+
+  writeFileSync(
+    fakeBridgePath,
+    `
+import http from 'node:http'
+import { writeFileSync } from 'node:fs'
+const logPath = ${JSON.stringify(logPath)}
+const captureId = 'cap_1234567890123456789012'
+const profile = ${JSON.stringify(fakeProfile)}
+let requestBody = null
+const token = 'spb_${'f'.repeat(43)}'
+const server = http.createServer((req, res) => {
+  const chunks = []
+  req.on('data', chunk => chunks.push(chunk))
+  req.on('end', () => {
+    const send = (status, body) => {
+      res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify(body))
+    }
+    if (req.method === 'POST' && req.url === '/v1/captures') {
+      requestBody = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+      return send(200, { id: captureId, status: 'queued' })
+    }
+    if (req.url === '/v1/captures/' + captureId) return send(200, { id: captureId, status: 'completed', phase: 'cleanup' })
+    if (req.url === '/v1/captures/' + captureId + '/profile-download') return send(200, { ...profile, captureId })
+    return send(404, { error: { code: 'NOT_FOUND' } })
+  })
+})
+server.listen(0, '127.0.0.1', () => {
+  const port = server.address().port
+  process.stdout.write(JSON.stringify({
+    event: 'stackprism-bridge-ready',
+    protocolVersion: 1,
+    baseUrl: 'http://127.0.0.1:' + port,
+    healthUrl: 'http://127.0.0.1:' + port + '/health',
+    apiToken: token
+  }) + '\\n')
+})
+process.stdin.on('end', () => {
+  writeFileSync(logPath, JSON.stringify({ requestBody }))
+  server.close(() => process.exit(0))
+})
+process.stdin.resume()
+`,
+    'utf8'
+  )
+
+  try {
+    const child = spawn(
+      process.execPath,
+      [
+        'agent-skill/stackprism-site-experience/scripts/capture-site.mjs',
+        '--url',
+        'https://example.test/',
+        '--out',
+        profilePath,
+        '--include',
+        'tech,visual,ux',
+        '--no-screenshot'
+      ],
+      {
+        cwd: new URL('..', import.meta.url),
+        env: { ...process.env, STACKPRISM_CAPTURE_BRIDGE_SCRIPT: fakeBridgePath, STACKPRISM_CAPTURE_TERMINAL_SETTLE_MS: '50' },
+        stdio: ['ignore', 'pipe', 'pipe']
+      }
+    )
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', chunk => {
+      stdout += String(chunk)
+    })
+    child.stderr.on('data', chunk => {
+      stderr += String(chunk)
+    })
+    const [code] = await once(child, 'exit')
+    assert.equal(code, 0, stderr)
+    const summary = JSON.parse(stdout.trim())
+    const fakeBridgeLog = JSON.parse(readFileSync(logPath, 'utf8'))
+    assert.deepEqual(fakeBridgeLog.requestBody.include, ['tech', 'visual', 'ux'])
+    assert.equal(fakeBridgeLog.requestBody.options.captureScreenshot, false)
+    assert.equal(summary.include.includes('components'), false)
+    assert.deepEqual(summary.include, ['tech', 'visual', 'ux'])
+    assert.equal(summary.captureScreenshot, false)
   } finally {
     rmSync(tempDir, { recursive: true, force: true })
   }
@@ -2475,6 +2704,72 @@ process.stdin.resume()
     assert.equal(error.error.code, 'TARGET_LOAD_FAILED')
     assert.doesNotMatch(stderr, /token=secret|apiToken=|Bearer spb_|#frag/)
     assert.match(stderr, /\[redacted/)
+    assert.equal(existsSync(profilePath), false)
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true })
+  }
+})
+
+test('capture-site helper exits with CAPTURE_BUSY without writing profile', async () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'stackprism-capture-site-busy-'))
+  const fakeBridgePath = join(tempDir, 'fake-bridge-busy.mjs')
+  const profilePath = join(tempDir, 'profile.json')
+  writeFileSync(
+    fakeBridgePath,
+    `
+import http from 'node:http'
+const token = 'spb_${'g'.repeat(43)}'
+const server = http.createServer((req, res) => {
+  const send = (status, body) => {
+    res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' })
+    res.end(JSON.stringify(body))
+  }
+  if (req.method === 'POST' && req.url === '/v1/captures') {
+    return send(409, {
+      error: {
+        code: 'CAPTURE_BUSY',
+        message: 'Capture already active.',
+        details: { captureId: 'cap_abcdefghijklmnopqrstuv' }
+      }
+    })
+  }
+  return send(404, { error: { code: 'NOT_FOUND' } })
+})
+server.listen(0, '127.0.0.1', () => {
+  const port = server.address().port
+  process.stdout.write(JSON.stringify({ event: 'stackprism-bridge-ready', protocolVersion: 1, baseUrl: 'http://127.0.0.1:' + port, healthUrl: 'http://127.0.0.1:' + port + '/health', apiToken: token }) + '\\n')
+})
+process.stdin.on('end', () => server.close(() => process.exit(0)))
+process.stdin.resume()
+`,
+    'utf8'
+  )
+
+  try {
+    const child = spawn(
+      process.execPath,
+      ['agent-skill/stackprism-site-experience/scripts/capture-site.mjs', '--url', 'https://example.test/', '--out', profilePath],
+      {
+        cwd: new URL('..', import.meta.url),
+        env: { ...process.env, STACKPRISM_CAPTURE_BRIDGE_SCRIPT: fakeBridgePath },
+        stdio: ['ignore', 'pipe', 'pipe']
+      }
+    )
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', chunk => {
+      stdout += String(chunk)
+    })
+    child.stderr.on('data', chunk => {
+      stderr += String(chunk)
+    })
+    const [code] = await once(child, 'exit')
+    const error = JSON.parse(stderr.trim())
+
+    assert.notEqual(code, 0)
+    assert.equal(stdout.trim(), '')
+    assert.equal(error.error.code, 'CAPTURE_BUSY')
+    assert.match(error.error.message, /Capture already active/)
     assert.equal(existsSync(profilePath), false)
   } finally {
     rmSync(tempDir, { recursive: true, force: true })

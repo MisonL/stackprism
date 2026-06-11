@@ -119,6 +119,10 @@ test('release workflow rejects agent bridge helper source files from dist artifa
     '__pycache__',
     'stackprism-bridge\\.mjs',
     'stackprism_bridge\\.py',
+    'capture-site\\.mjs',
+    'capture-site-args\\.mjs',
+    'capture-runtime\\.mjs',
+    'capture-screenshot-artifact\\.mjs',
     'capture-store\\.mjs',
     'http-handlers\\.mjs',
     'http-server\\.mjs',
@@ -169,7 +173,9 @@ test('firefox package manifest omits reserved data collection permissions', asyn
         ]
       }),
       'dist/service-worker-loader.js': "import './assets/background-entry.js'",
-      'dist/assets/background-entry.js': 'chrome.runtime.onInstalled.addListener(() => {})'
+      'dist/assets/background-entry.js': 'chrome.runtime.onInstalled.addListener(() => {})',
+      'dist/assets/my-security.mjs': 'export {}',
+      'dist/injected/experience-profiler.iife.js': 'void 0'
     },
     async cwd => {
       const result = await packageFirefox({ root: cwd, logger: { log() {} } })
@@ -192,7 +198,10 @@ test('firefox package manifest omits reserved data collection permissions', asyn
       assert.equal('use_dynamic_url' in manifestJson.web_accessible_resources[0], false)
       assert.doesNotMatch(JSON.stringify(manifestJson), /data_collection_permissions/)
       assert.doesNotMatch(JSON.stringify(manifestJson), /use_dynamic_url/)
+      assert.doesNotMatch(JSON.stringify(manifestJson.web_accessible_resources), /experience-profiler/)
       assert.ok((await stat(join(cwd, 'dist-firefox/background.js'))).isFile())
+      assert.ok((await stat(join(cwd, 'dist-firefox/assets/my-security.mjs'))).isFile())
+      assert.ok((await stat(join(cwd, 'dist-firefox/injected/experience-profiler.iife.js'))).isFile())
       assert.ok((await stat(join(cwd, 'release/stackprism-v1.3.71.xpi'))).isFile())
     }
   )
@@ -231,13 +240,61 @@ test('firefox package bundles content script loaders into plain scripts', async 
       const scripts = manifestJson.content_scripts.flatMap(script => script.js)
 
       assert.deepEqual(scripts, ['firefox/content-observer.js', 'firefox/agent-bridge-client.js'])
-      assert.equal(scripts.some(file => /loader/i.test(file)), false)
+      assert.equal(
+        scripts.some(file => /loader/i.test(file)),
+        false
+      )
 
       for (const file of scripts) {
         const bundled = await readFile(join(cwd, 'dist-firefox', file), 'utf8')
         assert.doesNotMatch(bundled, /chrome\.runtime\.getURL/)
         assert.doesNotMatch(bundled, /await\s+import/)
       }
+    }
+  )
+})
+
+test('firefox package rejects agent-only files before writing xpi', async () => {
+  await withFirefoxDist(
+    {
+      'dist/manifest.json': manifest({
+        background: { service_worker: 'service-worker-loader.js' }
+      }),
+      'dist/service-worker-loader.js': "import './assets/background-entry.js'",
+      'dist/assets/background-entry.js': 'chrome.runtime.onInstalled.addListener(() => {})',
+      'dist/assets/http-server.mjs': 'export {}'
+    },
+    async cwd => {
+      await assert.rejects(
+        () => packageFirefox({ root: cwd, logger: { log() {} } }),
+        /Firefox artifact hygiene failed:[\s\S]*dist-firefox contains agent-only or test artifact: assets\/http-server\.mjs/
+      )
+      await assert.rejects(stat(join(cwd, 'release/stackprism-v1.3.71.xpi')))
+    }
+  )
+})
+
+test('firefox package rejects web accessible agent-only resources', async () => {
+  await withFirefoxDist(
+    {
+      'dist/manifest.json': manifest({
+        background: { service_worker: 'service-worker-loader.js' },
+        web_accessible_resources: [
+          {
+            resources: ['injected/experience-profiler.iife.js', 'assets/security.mjs'],
+            matches: ['http://127.0.0.1/*']
+          }
+        ]
+      }),
+      'dist/service-worker-loader.js': "import './assets/background-entry.js'",
+      'dist/assets/background-entry.js': 'chrome.runtime.onInstalled.addListener(() => {})'
+    },
+    async cwd => {
+      await assert.rejects(
+        () => packageFirefox({ root: cwd, logger: { log() {} } }),
+        /Firefox artifact hygiene failed:[\s\S]*web_accessible_resources exposes agent-only path: injected\/experience-profiler\.iife\.js[\s\S]*web_accessible_resources exposes agent-only path: assets\/security\.mjs/
+      )
+      await assert.rejects(stat(join(cwd, 'release/stackprism-v1.3.71.xpi')))
     }
   )
 })
@@ -253,6 +310,7 @@ test('release workflow dist hygiene script passes a clean dist artifact', async 
     {
       'dist/manifest.json': manifest(),
       'dist/assets/agent-bridge-client.ts-DEPRr4GS.js': 'export {}',
+      'dist/assets/my-security.mjs': 'export {}',
       'dist/injected/page-detector.iife.js': 'void 0'
     },
     cwd => {

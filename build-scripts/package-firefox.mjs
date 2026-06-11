@@ -1,5 +1,5 @@
-import { cpSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync, createWriteStream } from 'node:fs'
-import { basename, resolve, dirname } from 'node:path'
+import { cpSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync, createWriteStream, readdirSync, statSync } from 'node:fs'
+import { basename, resolve, dirname, relative } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import archiver from 'archiver'
@@ -7,6 +7,24 @@ import archiver from 'archiver'
 const require = createRequire(import.meta.url)
 const esbuild = require('esbuild')
 const defaultRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const agentOnlySourceFiles = [
+  'stackprism-bridge.mjs',
+  'stackprism_bridge.py',
+  'capture-site.mjs',
+  'capture-site-args.mjs',
+  'capture-runtime.mjs',
+  'capture-screenshot-artifact.mjs',
+  'capture-store.mjs',
+  'http-handlers.mjs',
+  'http-server.mjs',
+  'open-browser.mjs',
+  'protocol.mjs',
+  'security.mjs',
+  'url-policy.mjs'
+]
+const agentOnlySourceFileSet = new Set(agentOnlySourceFiles)
+const agentOnlyPathPatterns = [/(?:^|\/)agent-skill(?:\/|$)/, /(?:^|\/)docs\/superpowers(?:\/|$)/, /(?:^|\/)tests(?:\/|$)/]
+const disallowedPackagePatterns = [...agentOnlyPathPatterns, /(?:^|\/)__pycache__(?:\/|$)/, /\.py[co]?$/]
 
 export async function packageFirefox({ root = defaultRoot, logger = console } = {}) {
   const paths = firefoxPackagePaths(root)
@@ -14,8 +32,17 @@ export async function packageFirefox({ root = defaultRoot, logger = console } = 
   await bundleBackground(paths, logger)
   await bundleContentScripts(paths, logger)
   const manifest = writeFirefoxManifest(paths, logger)
+  assertFirefoxPackageHygiene(paths, manifest)
   const xpiPath = await writeXpi({ root, firefoxDir: paths.firefoxDir, manifest, logger })
   return { firefoxDir: paths.firefoxDir, manifestPath: paths.manifestPath, xpiPath }
+}
+
+function pathBasename(value) {
+  return basename(String(value || '').replaceAll('\\', '/'))
+}
+
+function isAgentOnlySourcePath(path) {
+  return agentOnlySourceFileSet.has(pathBasename(path))
 }
 
 function firefoxPackagePaths(root) {
@@ -137,6 +164,49 @@ function writeFirefoxManifest({ manifestPath }, logger) {
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2))
   logger.log('[package-firefox] manifest.json transformed')
   return manifest
+}
+
+function assertFirefoxPackageHygiene({ firefoxDir }, manifest) {
+  const failures = []
+
+  if (Object.prototype.hasOwnProperty.call(manifest, 'externally_connectable')) {
+    failures.push('dist-firefox/manifest.json must not expose externally_connectable')
+  }
+
+  for (const resource of manifest.web_accessible_resources || []) {
+    for (const path of resource.resources || []) {
+      if (
+        agentOnlyPathPatterns.some(pattern => pattern.test(path)) ||
+        isAgentOnlySourcePath(path) ||
+        path.includes('experience-profiler.iife.js')
+      ) {
+        failures.push(`web_accessible_resources exposes agent-only path: ${path}`)
+      }
+    }
+  }
+
+  for (const file of walkFiles(firefoxDir)) {
+    if (disallowedPackagePatterns.some(pattern => pattern.test(file)) || isAgentOnlySourcePath(file)) {
+      failures.push(`dist-firefox contains agent-only or test artifact: ${file}`)
+    }
+  }
+
+  if (failures.length) {
+    throw new Error(`[package-firefox] Firefox artifact hygiene failed:\n${failures.map(failure => `- ${failure}`).join('\n')}`)
+  }
+}
+
+function walkFiles(root, dir = root) {
+  const files = []
+  for (const entry of readdirSync(dir)) {
+    const fullPath = resolve(dir, entry)
+    if (statSync(fullPath).isDirectory()) {
+      files.push(...walkFiles(root, fullPath))
+      continue
+    }
+    files.push(relative(root, fullPath).replaceAll('\\', '/'))
+  }
+  return files
 }
 
 async function writeXpi({ root, firefoxDir, manifest, logger }) {
