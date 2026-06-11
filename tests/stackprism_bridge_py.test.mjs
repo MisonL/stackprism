@@ -6,6 +6,7 @@ import net from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
+import { bridgePageScript, bridgePageStyle } from '../agent-skill/stackprism-site-experience/scripts/bridge/bridge-page-assets.mjs'
 import identifiers from './fixtures/bridge-protocol-identifiers.json' with { type: 'json' }
 import urlPolicyCases from './fixtures/bridge-url-policy-cases.json' with { type: 'json' }
 
@@ -19,7 +20,11 @@ const request = {
 }
 
 const readJson = async response => ({ status: response.status, body: await response.json(), headers: response.headers })
-const readBytes = async response => ({ status: response.status, body: Buffer.from(await response.arrayBuffer()), headers: response.headers })
+const readBytes = async response => ({
+  status: response.status,
+  body: Buffer.from(await response.arrayBuffer()),
+  headers: response.headers
+})
 
 const sensitiveFailedError = (ready, created, config) => {
   const sensitiveUrl = `${created.body.bridgeUrl}&token=secret&apiToken=${ready.apiToken}&bridgeToken=${config.bridgeToken}#frag`
@@ -576,6 +581,19 @@ print(json.dumps(result, sort_keys=True))
   assert.equal(parsed.message, 'INVALID_CSP_NONCE')
 })
 
+test('python fallback bridge page assets match javascript bridge assets', () => {
+  const parsed = pythonOneShot(`
+from stackprism_bridge_lib.bridge_page_assets import BRIDGE_PAGE_SCRIPT, BRIDGE_PAGE_STYLE
+print(json.dumps({
+    "script": BRIDGE_PAGE_SCRIPT,
+    "style": BRIDGE_PAGE_STYLE,
+}, sort_keys=True))
+`)
+
+  assert.equal(parsed.style, bridgePageStyle)
+  assert.equal(parsed.script, bridgePageScript)
+})
+
 test('python fallback bridge page reports renderer nonce failures over HTTP', () => {
   const parsed = pythonOneShot(`
 from stackprism_bridge_lib.server_factory import create_server
@@ -753,7 +771,10 @@ test('python fallback bridge page has CSP nonce and script-safe config', async (
     assert.match(html, /id="bridgeCard" class="bridge-card" data-status="waiting_extension" aria-labelledby="bridge-title" tabindex="-1"/)
     assert.match(html, /id="progressBar"/)
     assert.match(html, /id="targetUrl" class="target-url" title="" target="_blank" rel="noopener noreferrer" aria-disabled="true"/)
-    assert.match(html, /id="openTargetUrl" class="preview-button target-open-link" target="_blank" rel="noopener noreferrer" aria-disabled="true" tabindex="-1"/)
+    assert.match(
+      html,
+      /id="openTargetUrl" class="preview-button target-open-link" target="_blank" rel="noopener noreferrer" aria-disabled="true" tabindex="-1"/
+    )
     assert.match(html, /id="targetScreenshot"/)
     assert.match(html, /id="targetScreenshot" alt=""/)
     assert.match(html, /id="screenshotMeta"/)
@@ -768,10 +789,7 @@ test('python fallback bridge page has CSP nonce and script-safe config', async (
     assert.match(html, /id="screenshotStateBadge" class="state-chip" data-state="pending"/)
     assert.match(html, /id="screenshotEmpty"/)
     assert.match(html, /id="stepSummary" class="step-summary" role="status" aria-live="polite"/)
-    assert.match(
-      html,
-      /id="toggleSteps" class="flow-toggle" type="button" aria-controls="captureSteps" aria-expanded="false"/,
-    )
+    assert.match(html, /id="toggleSteps" class="flow-toggle" type="button" aria-controls="captureSteps" aria-expanded="false"/)
     assert.match(html, /<ol id="captureSteps" class="steps" aria-label="采集步骤" role="list">/)
     assert.match(html, /data-phase="bridge_connected" aria-current="step"/)
     assert.match(html, /id="profileContentSection"/)
@@ -799,7 +817,10 @@ test('python fallback bridge page has CSP nonce and script-safe config', async (
     assert.match(html, /if\(status==='completed'\)ensureProfileCached\(\)\.catch\(\(\)=>\{\}\)/)
     assert.match(html, /\/profile-download/)
     assert.doesNotMatch(html, /config\.captureId\+'\/profile'/)
-    assert.match(html, /button:not\(:disabled\),a\[href\],input:not\(:disabled\),select:not\(:disabled\),textarea:not\(:disabled\),\[tabindex\]:not\(\[tabindex="-1"\]\)/)
+    assert.match(
+      html,
+      /button:not\(:disabled\),a\[href\],input:not\(:disabled\),select:not\(:disabled\),textarea:not\(:disabled\),\[tabindex\]:not\(\[tabindex="-1"\]\)/
+    )
     assert.match(html, /currentScreenshot\?\.mimeType==='image\/png'\?'png'/)
     assert.match(html, /currentScreenshot\?\.mimeType==='image\/webp'\?'webp'/)
     assert.match(html, /currentScreenshotObjectUrl=URL\.createObjectURL\(blob\)/)
@@ -816,7 +837,10 @@ test('python fallback bridge page has CSP nonce and script-safe config', async (
     assert.match(html, /\.target-copy\{min-width:0\}/)
     assert.match(html, /\.target-url\{margin:0;display:-webkit-box;overflow:hidden;overflow-wrap:anywhere;word-break:break-word/)
     assert.match(html, /\.target-actions\{display:flex;min-width:0;flex-wrap:wrap;gap:10px;justify-content:flex-end\}/)
-    assert.match(html, /\.target-open-link\{min-width:132px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none\}/)
+    assert.match(
+      html,
+      /\.target-open-link\{min-width:132px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none\}/
+    )
     assert.match(html, /\.content-card \*\{min-width:0;max-width:100%;overflow-wrap:anywhere;word-break:break-word\}/)
     assert.match(html, /\.content-card\{min-width:0;min-height:88px;padding:10px;overflow:hidden/)
     assert.match(html, /\.content-card ul\{display:grid;min-width:0;gap:3px/)
@@ -856,7 +880,7 @@ test('python fallback bridge page has CSP nonce and script-safe config', async (
     assert.match(html, /addEventListener\('click',\(\)=>setStepsOpen\(!stepsOpen,true\)\)/)
     assert.match(
       html,
-      /\.preview-button:disabled,.modal-close:disabled,.preview-button\[aria-disabled="true"\]\{cursor:not-allowed;opacity:1;background:#f7fbfa/,
+      /\.preview-button:disabled,.modal-close:disabled,.preview-button\[aria-disabled="true"\]\{cursor:not-allowed;opacity:1;background:#f7fbfa/
     )
     assert.match(html, /setCopyStatus\(modalOpen\(\)\?el\.modalCopyStatus:el\.copyStatus,value,type\)/)
     assert.match(html, /const restore=el\.screenshotFrame\.disabled\?el\.bridgeCard:el\.screenshotFrame/)
@@ -1265,7 +1289,10 @@ test('python fallback bridge token can fetch request and post profile', async ()
     )
     assert.equal(screenshotDownload.status, 200)
     assert.equal(screenshotDownload.headers.get('content-type'), 'image/jpeg')
-    assert.equal(screenshotDownload.headers.get('content-disposition'), `attachment; filename="stackprism-${created.body.id}-screenshot.jpg"`)
+    assert.equal(
+      screenshotDownload.headers.get('content-disposition'),
+      `attachment; filename="stackprism-${created.body.id}-screenshot.jpg"`
+    )
     assert.equal(screenshotDownload.body.toString('utf8'), 'fake-jpeg')
 
     const apiScreenshotDownload = await readBytes(

@@ -20,6 +20,8 @@ Use `capture-site.mjs` for ordinary agent work. Use `stackprism-bridge.mjs` or t
 
 The bridge page opened in the browser becomes a result workbench after completion: target URL, screenshot preview, enlarged screenshot preview, screenshot download/copy, one-click Markdown summary, and grouped profile content cards. The page reads only the status preview with its one-capture `bridgeToken`; raw `/profile` still requires the API token.
 
+The JavaScript bridge and Python fallback intentionally share the same bridge page CSS and client script text. If `scripts/bridge/bridge-page-assets.mjs` changes, update `scripts/stackprism_bridge_lib/bridge_page_assets.py` in the same patch and keep `tests/stackprism_bridge_py.test.mjs` passing.
+
 Profile JSON is standard JSON and cannot contain comments. Screenshot guidance is stored in `note`, `profileJsonNote`, and `agentGuidance.recreationPlan.visualReference.screenshotDownloadHint`. Screenshot base64 is intentionally omitted; open `visualProfile.screenshot.downloadUrl` to inspect the actual visual appearance.
 
 Lifecycle: direct bridge screenshot links are valid only while the local bridge process is running and before the completed result TTL expires. The capture helper avoids that race by downloading the image during the live bridge window and saving a stable local `file://` URL plus `localPath` in the written Profile.

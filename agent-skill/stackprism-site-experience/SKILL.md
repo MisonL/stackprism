@@ -42,6 +42,8 @@ Set `STACKPRISM_BROWSER_OPEN_COMMAND` and `STACKPRISM_BROWSER_OPEN_ARGS_JSON` on
 
 The helper prints one JSON summary on stdout. `screenshotPresent` means the profile contains screenshot evidence; `screenshotWritten` means the screenshot image was written to `screenshotPath` and can be opened by image-capable coding tools. If `--screenshot-out` is omitted, the helper writes a sidecar image next to `--out` and rewrites the Profile screenshot reference to that local file URL before saving the JSON.
 
+Reference files are available for deeper consumption details. Read `references/site-experience-profile-schema.md` when implementing or validating Profile schema handling, and read `references/agent-consumption-guide.md` when translating a captured Profile into a target UI or app implementation.
+
 By default the helper opens a fresh target tab and does not force-refresh it. Use `--force-refresh` only when you need a controlled cache-bypass capture; this avoids treating browser-superseded initial navigations as target load failures on large public sites.
 
 Each bridge API request has a bounded timeout. The default is 30000 ms; use `--request-timeout-ms <ms>` only when a slower local browser opener or debug bridge needs more time. If it exits with `BRIDGE_REQUEST_TIMEOUT`, stop that attempt and start one fresh helper process rather than reusing a partial capture.
