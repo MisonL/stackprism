@@ -1,6 +1,6 @@
 ---
 name: stackprism-site-experience
-description: Use when an AI agent needs to recreate or improve a website from a real URL. Captures browser-observed tech stack, UI design, layout, interactions, UX, and assets through StackPrism so the agent can build from evidence.
+description: Use when an AI agent must capture a StackPrism Agent Bridge profile from a specific http(s) URL for browser-observed evidence, website recreation, UX comparison, or live fact verification. Do not use for generic UI edits, backend-only work, web search, or StackPrism internal code review unless a target URL profile capture is required.
 ---
 
 # StackPrism Site Experience
@@ -9,19 +9,20 @@ StackPrism helps AI agents recreate websites from real browser evidence: tech st
 
 Use this skill proactively when the task involves:
 
+- Capturing a StackPrism profile or browser evidence from a specific `http:` or `https:` URL.
 - Building or cloning a page, app, component set, landing page, dashboard, or marketing site similar to an existing URL.
 - Reviewing or improving UI/UX by comparing against a live product, competitor, reference site, or production page.
 - Choosing implementation details from evidence: detected technologies, visual tokens, layout density, component patterns, interaction behavior, asset dependencies, and first-order UX structure.
-- Verifying that a target page's browser-observed facts match a design brief, audit claim, or migration requirement.
+- Verifying that a target page's browser-observed facts match a design brief, audit claim, migration requirement, or Agent Bridge E2E claim.
 
-Do not use this skill for backend-only tasks, generic web search, SEO content extraction, login-protected private data capture, or cases where the user has not installed and enabled StackPrism Agent Bridge.
+Do not use this skill for backend-only tasks, generic web search, SEO content extraction, login-protected private data capture, generic UI work with no target URL, or StackPrism internal source review unless the task actually needs a target URL Profile capture through Agent Bridge.
 
 ## Preconditions
 
 - The user has installed the StackPrism extension in the browser profile that will open the bridge page.
 - StackPrism Agent Bridge is enabled in the extension settings for that local browser profile.
 - The target URL is `http:` or `https:`.
-- Local development targets require `"allowPrivateNetworkTarget": true`.
+- Local development targets require both extension settings consent for all network targets and helper/request option `"allowPrivateNetworkTarget": true`.
 - Public hostnames routed through common local proxy/TUN fake-IP ranges such as `198.18.0.0/15` are supported by default. Direct private IPs, `localhost`, RFC1918, link-local, and other special-use targets still require `"allowPrivateNetworkTarget": true`.
 - If the user has enabled the extension's high-risk "allow all network targets" setting, still pass `--allow-private-network` for local development, direct private IP, or real intranet targets; the extension setting affects the browser-observed final target gate, while the helper's create-stage URL policy remains explicit per capture.
 
@@ -52,7 +53,7 @@ The opened bridge page is also a local result workbench. After completion it sho
 
 Profile JSON is standard JSON and cannot contain comments. Screenshot handling instructions are carried in `visualProfile.screenshot.note`, `visualProfile.screenshot.profileJsonNote`, and `agentGuidance.recreationPlan.visualReference.screenshotDownloadHint`.
 
-If the helper exits with `PRIVATE_NETWORK_TARGET_BLOCKED` for a local development, direct private IP, or real intranet target, run a second fresh helper process with `--allow-private-network` and record that this was a controlled override. Do not reuse the first bridge URL, capture id, session, or token. Do not add `--allow-private-network` just because a public hostname is routed through `198.18.0.0/15`; that proxy/TUN case is allowed by default.
+If the helper exits with `PRIVATE_NETWORK_TARGET_BLOCKED` for a local development, direct private IP, or real intranet target, first confirm the StackPrism settings page has the high-risk "allow all network targets" option enabled for this browser profile, then run a second fresh helper process with `--allow-private-network` and record that this was a controlled override. Do not reuse the first bridge URL, capture id, session, or token. Do not add `--allow-private-network` just because a public hostname is routed through `198.18.0.0/15`; that proxy/TUN case is allowed by default.
 
 If the helper exits with `CAPTURE_BUSY`, wait a few seconds, stop any bridge child process from that attempt, and run one fresh helper process. Do not keep polling an old capture after a terminal or stale status.
 
@@ -91,6 +92,7 @@ Keep the executable and arguments separate. For example, use `STACKPRISM_BROWSER
 Platform notes:
 
 - macOS default opener: `open`. To force Chrome, use `STACKPRISM_BROWSER_OPEN_COMMAND=open` and `STACKPRISM_BROWSER_OPEN_ARGS_JSON='["-a","Google Chrome"]'`. To select a Chrome profile, use the Chrome executable as the command and pass profile args, for example `["--profile-directory=Default"]`.
+- Firefox profiles: set `STACKPRISM_BROWSER_OPEN_COMMAND` to the Firefox executable and put profile arguments in `STACKPRISM_BROWSER_OPEN_ARGS_JSON`, for example `["-P","default-release"]` or `["--profile","/absolute/path/to/profile"]`. Do not pass the bridge URL in those args.
 - Windows default opener: command `rundll32.exe` with the built-in argument `url.dll,FileProtocolHandler`. To force Chrome or Edge, set `STACKPRISM_BROWSER_OPEN_COMMAND` to the full browser `.exe` path and put profile args such as `["--profile-directory=Default"]` in `STACKPRISM_BROWSER_OPEN_ARGS_JSON`.
 - Linux default opener: `xdg-open`. To force Chrome or Chromium, set `STACKPRISM_BROWSER_OPEN_COMMAND` to `google-chrome`, `chromium`, or the absolute executable path, and put profile args such as `["--profile-directory=Default"]` in `STACKPRISM_BROWSER_OPEN_ARGS_JSON`.
 
@@ -128,16 +130,17 @@ Large pages can produce multi-chunk profile transfers. If the browser extension 
 Handle user-actionable failures explicitly:
 
 - `AGENT_BRIDGE_DISABLED`: ask the user to enable Agent Bridge in the StackPrism settings for this local browser profile. Do not retry or fall back to a mock profile.
-- `EXTENSION_NOT_CONNECTED`: the opened browser/profile probably does not have StackPrism installed or enabled. Set `STACKPRISM_BROWSER_OPEN_COMMAND` and `STACKPRISM_BROWSER_OPEN_ARGS_JSON` for the correct Chrome/Edge profile.
+- `EXTENSION_NOT_CONNECTED`: the opened browser/profile probably does not have StackPrism installed or enabled. Set `STACKPRISM_BROWSER_OPEN_COMMAND` and `STACKPRISM_BROWSER_OPEN_ARGS_JSON` for the correct Chrome, Edge, or Firefox profile.
 - `BROWSER_OPEN_FAILED`: surface the sanitized stderr/details and keep the capture failed. Do not ask the user to paste a token-bearing bridge URL.
 
 ## Use The Profile
 
-- Start from `agentGuidance.recreationPlan`. Follow its `implementationOrder`, then map `designTokens`, `layoutBlueprint`, `componentInventory`, `interactionChecklist`, `uxChecklist`, and `assetHints` into the target project.
-- Use `visualProfile.screenshot.downloadUrl` as an optional visual reference only when it is present and your model supports image input. The Profile JSON intentionally omits screenshot base64; download or open the image to see the actual visual effect.
+- Start from `agentGuidance.recreationPlan`. Follow its `implementationOrder`, then map `designTokens`, `layoutBlueprint`, `componentInventory`, `interactionChecklist`, `uxChecklist`, `assetHints`, `visualReference`, and `verificationChecklist` into the target project.
+- Use `visualProfile.screenshot.downloadUrl` as an optional visual reference only when it is present and your model supports image input. The Profile JSON intentionally omits screenshot base64; download or open the image to see the actual visual effect, and do not use screenshots from login-protected or private pages because pixels are not redacted.
 - Treat `techProfile` as implementation guidance, not a mandate to copy the source site's private stack.
 - Prioritize layout density, visual hierarchy, interaction feedback, and information architecture.
 - Respect `limitations`; missing fields may mean a section was not requested or was truncated.
+- Verify the result with `agentGuidance.recreationPlan.verificationChecklist` plus destination-app screenshots, DOM geometry, and interaction smoke tests.
 - Do not reproduce sensitive text, account data, tokens, signed URLs, or private user content.
 
 ## Trust Boundary

@@ -15,7 +15,7 @@ Top-level fields:
 - `assetProfile`: scripts, stylesheets, resource domains, image/font hints, manifest, favicon, and redaction policy.
 - `evidence`: confidence buckets, raw counts, source coverage, and truncation metadata.
 - `limitations`: explicit capture boundaries and omitted sections.
-- `agentGuidance`: implementation priorities, cautions, and `recreationPlan` for downstream agents. `recreationPlan` contains `implementationOrder`, `designTokens`, `layoutBlueprint`, `componentInventory`, `interactionChecklist`, `uxChecklist`, `assetHints`, and `verificationChecklist`.
+- `agentGuidance`: implementation priorities, cautions, and `recreationPlan` for downstream agents. `recreationPlan` contains `implementationOrder` for task order, `designTokens` for visual system choices, `layoutBlueprint` for structure, `componentInventory` for reusable UI pieces, `interactionChecklist` for passive behavior cues, `uxChecklist` for user-flow priorities, `assetHints` for dependency and media clues, `visualReference` for optional screenshot handling, and `verificationChecklist` for destination-app acceptance checks.
 
 Profiles must not contain cookie values, authorization values, localStorage/sessionStorage plaintext, signed URL secrets, full sensitive query strings, or copied private page text. UX labels and text samples must be short, best-effort summaries with token-like values, email, phone numbers, long numeric identifiers, hashes, and sensitive query values redacted before they reach the bridge.
 

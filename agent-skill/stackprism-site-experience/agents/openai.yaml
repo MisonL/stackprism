@@ -1,7 +1,7 @@
 interface:
   display_name: 'StackPrism Site Experience'
-  short_description: 'Evidence for website recreation'
+  short_description: 'Capture browser evidence profiles'
   brand_color: '#0F766E'
-  default_prompt: 'Use $stackprism-site-experience to inspect this URL and recreate a similar site from observed tech stack, UI, layout, UX, and assets.'
+  default_prompt: 'Use $stackprism-site-experience to capture a StackPrism Agent Bridge profile for this http(s) URL, after confirming the extension is installed, Agent Bridge is enabled, and the target is not a login-protected private page.'
 policy:
   allow_implicit_invocation: true

@@ -117,7 +117,7 @@
 
 ## 13. Skills 使用规则
 
-- 开始任务前扫描仓库内可用技能文档。当前已知 repo-local skill 是 `agent-skill/stackprism-site-experience/SKILL.md`。
+- 开始任务前只需轻量确认仓库内可用技能文档。当前已知 repo-local skill 是 `agent-skill/stackprism-site-experience/SKILL.md`。
 - 当任务需要通过用户已安装的 StackPrism 扩展采集目标网站体验 profile 时，必须阅读并遵循该 skill。
 - JavaScript bridge 优先使用 `node agent-skill/stackprism-site-experience/scripts/stackprism-bridge.mjs`；仅当 Node 不可用时使用 Python fallback。
 - bridge stdout 只能读取 ready JSON 行；普通日志和启动错误应在 stderr。解析失败要显式报错，不得继续伪造 ready 状态。

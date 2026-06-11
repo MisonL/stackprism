@@ -98,6 +98,8 @@ node agent-skill/stackprism-site-experience/scripts/capture-site.mjs \
   --out /tmp/stackprism-profile.json
 ```
 
+本机开发目标、`localhost`、`127.0.0.1`、私网地址和真实内网目标需要同时在扩展设置中开启高风险网络目标选项，并在 helper 请求中使用 `--allow-private-network`。不要复用被 `PRIVATE_NETWORK_TARGET_BLOCKED` 拒绝的旧 bridge URL。
+
 更完整的协议、生命周期和安全说明见 [docs/dev/agent-bridge.md](docs/dev/agent-bridge.md) 与 [agent-skill/stackprism-site-experience/SKILL.md](agent-skill/stackprism-site-experience/SKILL.md)。
 
 ## 规则维护

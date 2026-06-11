@@ -28,6 +28,8 @@ Lifecycle: direct bridge screenshot links are valid only while the local bridge 
 
 When selecting a non-default browser or profile, keep the opener executable and its arguments separate: `STACKPRISM_BROWSER_OPEN_COMMAND` is only the executable or platform opener, while `STACKPRISM_BROWSER_OPEN_ARGS_JSON` is a JSON string array of opener/profile arguments. The bridge URL is appended by the script as the final argv item.
 
+Local development targets such as `localhost`, `127.0.0.1`, RFC1918 addresses, and real intranet hosts require both the extension's high-risk all-network-targets setting and the helper/request `--allow-private-network` override. Treat a `PRIVATE_NETWORK_TARGET_BLOCKED` response as a safety gate, not as a reason to reuse the old bridge URL.
+
 ## Security Notes
 
 - API tokens are process-local and must not be written into files.

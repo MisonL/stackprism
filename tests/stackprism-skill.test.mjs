@@ -14,9 +14,48 @@ const profileSchemaSource = await readFile(
   'utf8'
 )
 
+const frontmatter = source => {
+  const match = source.match(/^---\n(?<body>[\s\S]*?)\n---/)
+  assert.ok(match?.groups?.body, 'skill must have YAML frontmatter')
+  return Object.fromEntries(
+    match.groups.body.split('\n').map(line => {
+      const separatorIndex = line.indexOf(':')
+      assert.ok(separatorIndex > 0, `invalid frontmatter line: ${line}`)
+      return [line.slice(0, separatorIndex).trim(), line.slice(separatorIndex + 1).trim()]
+    })
+  )
+}
+
+const yamlValue = (source, key) => {
+  const match = source.match(new RegExp(`^\\s*${key}:\\s*'(?<value>[^']+)'`, 'm'))
+  assert.ok(match?.groups?.value, `missing ${key} in openai.yaml`)
+  return match.groups.value
+}
+
+const fencedBlocks = source => [...source.matchAll(/```(?<lang>\w+)?\n(?<body>[\s\S]*?)```/g)].map(match => match.groups)
+
 test('stackprism site experience skill advertises the current bridge workflow', () => {
-  assert.match(skillSource, /name: stackprism-site-experience/)
-  assert.match(skillSource, /description: .*real URL.*StackPrism/)
+  const metadata = frontmatter(skillSource)
+  const bashBlocks = fencedBlocks(skillSource)
+    .filter(block => block.lang === 'bash')
+    .map(block => block.body)
+
+  assert.equal(metadata.name, 'stackprism-site-experience')
+  assert.match(metadata.description, /StackPrism Agent Bridge profile/)
+  assert.match(metadata.description, /specific http\(s\) URL/)
+  assert.match(metadata.description, /Do not use for generic UI edits/)
+  assert.ok(
+    bashBlocks.some(block => block.includes('scripts/capture-site.mjs')),
+    'skill must show preferred capture helper'
+  )
+  assert.ok(
+    bashBlocks.some(block => block.includes('scripts/stackprism-bridge.mjs')),
+    'skill must show JS bridge'
+  )
+  assert.ok(
+    bashBlocks.some(block => block.includes('scripts/stackprism_bridge.py')),
+    'skill must show Python fallback'
+  )
   assert.match(skillSource, /scripts\/capture-site\.mjs/)
   assert.match(skillSource, /scripts\/stackprism-bridge\.mjs/)
   assert.match(skillSource, /scripts\/stackprism_bridge\.py/)
@@ -27,6 +66,9 @@ test('stackprism site experience skill advertises the current bridge workflow', 
   assert.match(skillSource, /CAPTURE_BUSY/)
   assert.match(skillSource, /AGENT_BRIDGE_DISABLED/)
   assert.match(skillSource, /EXTENSION_NOT_CONNECTED/)
+  assert.match(skillSource, /Firefox profiles/)
+  assert.match(skillSource, /"--profile","\/absolute\/path\/to\/profile"/)
+  assert.match(skillSource, /correct Chrome, Edge, or Firefox profile/)
 })
 
 test('stackprism site experience skill points agents to repo-local references', () => {
@@ -38,17 +80,28 @@ test('stackprism site experience skill points agents to repo-local references', 
   assert.match(profileSchemaSource, /Screenshot image base64 is intentionally omitted/)
   assert.match(consumptionGuideSource, /Start from `agentGuidance\.recreationPlan`/)
   assert.match(consumptionGuideSource, /Read `limitations`/)
+  assert.match(consumptionGuideSource, /verificationChecklist/)
+  assert.match(consumptionGuideSource, /Raw `\/profile` access still requires the API token/)
+  assert.match(consumptionGuideSource, /Screenshots are not pixel-redacted/)
+  assert.match(profileSchemaSource, /`visualReference` for optional screenshot handling/)
+  assert.match(profileSchemaSource, /`verificationChecklist` for destination-app acceptance checks/)
 })
 
 test('stackprism site experience skill UI metadata remains aligned with global discovery', () => {
+  assert.equal(yamlValue(openaiYamlSource, 'display_name'), 'StackPrism Site Experience')
+  assert.equal(yamlValue(openaiYamlSource, 'short_description'), 'Capture browser evidence profiles')
+  assert.match(yamlValue(openaiYamlSource, 'default_prompt'), /\$stackprism-site-experience/)
+  assert.match(yamlValue(openaiYamlSource, 'default_prompt'), /StackPrism Agent Bridge profile/)
+  assert.match(yamlValue(openaiYamlSource, 'default_prompt'), /extension is installed/)
+  assert.match(yamlValue(openaiYamlSource, 'default_prompt'), /not a login-protected private page/)
   assert.match(openaiYamlSource, /display_name: 'StackPrism Site Experience'/)
-  assert.match(openaiYamlSource, /short_description: 'Evidence for website recreation'/)
-  assert.match(openaiYamlSource, /\$stackprism-site-experience/)
   assert.match(openaiYamlSource, /allow_implicit_invocation: true/)
 })
 
 test('repo-local skill documents bridge asset parity and local installation boundary', () => {
   assert.match(readmeSource, /not automatically installed into Codex or any global skill registry/)
   assert.match(readmeSource, /JavaScript bridge and Python fallback intentionally share the same bridge page CSS and client script text/)
+  assert.match(readmeSource, /Local development targets such as `localhost`/)
+  assert.match(readmeSource, /--allow-private-network/)
   assert.match(readmeSource, /tests\/stackprism_bridge_py\.test\.mjs/)
 })
