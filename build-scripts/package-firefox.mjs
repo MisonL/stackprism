@@ -120,6 +120,13 @@ function writeFirefoxManifest({ manifestPath }, logger) {
     manifest.background = { scripts: ['background.js'] }
   }
 
+  if (Array.isArray(manifest.web_accessible_resources)) {
+    manifest.web_accessible_resources = manifest.web_accessible_resources.map(resource => {
+      const { use_dynamic_url: _useDynamicUrl, ...rest } = resource
+      return rest
+    })
+  }
+
   manifest.browser_specific_settings = {
     gecko: {
       id: 'stackprism@setube.github.io',

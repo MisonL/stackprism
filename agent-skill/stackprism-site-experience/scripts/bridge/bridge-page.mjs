@@ -12,6 +12,7 @@ export const renderBridgePageHtml = (cspNonce, config) => {
 <meta charset="utf-8">
 <meta name="stackprism-agent-bridge" content="1">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230f766e'/%3E%3C/svg%3E">
 <title>StackPrism Agent Bridge</title>
 <style nonce="${cspNonce}">${bridgePageStyle}</style>
 </head>

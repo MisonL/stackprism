@@ -159,7 +159,14 @@ test('firefox package manifest omits reserved data collection permissions', asyn
   await withFirefoxDist(
     {
       'dist/manifest.json': manifest({
-        background: { service_worker: 'service-worker-loader.js' }
+        background: { service_worker: 'service-worker-loader.js' },
+        web_accessible_resources: [
+          {
+            resources: ['rules/*', 'tech-links.json'],
+            matches: ['http://*/*', 'https://*/*'],
+            use_dynamic_url: false
+          }
+        ]
       }),
       'dist/service-worker-loader.js': "import './assets/background-entry.js'",
       'dist/assets/background-entry.js': 'chrome.runtime.onInstalled.addListener(() => {})'
@@ -169,6 +176,12 @@ test('firefox package manifest omits reserved data collection permissions', asyn
       const manifestJson = JSON.parse(await readFile(result.manifestPath, 'utf8'))
 
       assert.deepEqual(manifestJson.background, { scripts: ['background.js'] })
+      assert.deepEqual(manifestJson.web_accessible_resources, [
+        {
+          resources: ['rules/*', 'tech-links.json'],
+          matches: ['http://*/*', 'https://*/*']
+        }
+      ])
       assert.deepEqual(manifestJson.browser_specific_settings, {
         gecko: {
           id: 'stackprism@setube.github.io',
@@ -176,7 +189,9 @@ test('firefox package manifest omits reserved data collection permissions', asyn
         }
       })
       assert.equal('data_collection_permissions' in manifestJson.browser_specific_settings.gecko, false)
+      assert.equal('use_dynamic_url' in manifestJson.web_accessible_resources[0], false)
       assert.doesNotMatch(JSON.stringify(manifestJson), /data_collection_permissions/)
+      assert.doesNotMatch(JSON.stringify(manifestJson), /use_dynamic_url/)
       assert.ok((await stat(join(cwd, 'dist-firefox/background.js'))).isFile())
       assert.ok((await stat(join(cwd, 'release/stackprism-v1.3.71.xpi'))).isFile())
     }
