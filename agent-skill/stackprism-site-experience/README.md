@@ -28,7 +28,28 @@ Lifecycle: direct bridge screenshot links are valid only while the local bridge 
 
 When selecting a non-default browser or profile, keep the opener executable and its arguments separate: `STACKPRISM_BROWSER_OPEN_COMMAND` is only the executable or platform opener, while `STACKPRISM_BROWSER_OPEN_ARGS_JSON` is a JSON string array of opener/profile arguments. The bridge URL is appended by the script as the final argv item.
 
-Local development targets such as `localhost`, `127.0.0.1`, RFC1918 addresses, and real intranet hosts require both the extension's high-risk all-network-targets setting and the helper/request `--allow-private-network` override. Treat a `PRIVATE_NETWORK_TARGET_BLOCKED` response as a safety gate, not as a reason to reuse the old bridge URL.
+Local development targets such as `localhost`, `127.0.0.1`, RFC1918 addresses, and real intranet hosts require both the extension's high-risk all-network-targets setting and the helper/request `--allow-private-network` override. Treat a `PRIVATE_NETWORK_TARGET_BLOCKED` response as a safety gate, not as a reason to reuse the old bridge URL. Localhost support is only for public, demo, or explicitly desensitized development pages; do not capture local or internal pages that contain private data.
+
+For local development captures, prefer an explicit opener/profile command so the bridge page opens in the browser profile that has StackPrism installed:
+
+```bash
+cd <repo-root>
+STACKPRISM_BROWSER_OPEN_COMMAND="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+STACKPRISM_BROWSER_OPEN_ARGS_JSON='["--profile-directory=Default"]' \
+node agent-skill/stackprism-site-experience/scripts/capture-site.mjs \
+  --url http://127.0.0.1:5173/ \
+  --allow-private-network \
+  --out /tmp/stackprism-local-profile.json \
+  --result-out /tmp/stackprism-local-result.json \
+  --screenshot-out /tmp/stackprism-local-screenshot.jpg \
+  --include tech,visual,layout,components,interaction,ux,assets
+```
+
+Do not capture login-protected, account-specific, billing, admin, inbox, dashboard, internal, or private user pages. Ask for a public demo URL, desensitized test-environment URL, user-provided already-redacted screenshot or recording, design brief, or anonymized page-structure summary instead. Screenshots are not pixel-redacted. If the user refers to the current browser page without a URL, ask for a public or desensitized `http:` or `https:` URL instead of using active-tab capture.
+
+Large-page transfer failures should use a bounded retry ladder. Retry commands must preserve the original capture context: same `TARGET_URL`, browser/profile opener env such as `STACKPRISM_BROWSER_OPEN_COMMAND` and `STACKPRISM_BROWSER_OPEN_ARGS_JSON`, and target policy flags such as `--allow-private-network`. For local/private retries, keep `STACKPRISM_CAPTURE_TARGET_FLAGS='--allow-private-network'` or include the flag directly on every reduced attempt. First retry with `--include tech,visual,layout,components,ux --max-resource-urls 150`; if that still fails and the user accepts losing screenshot evidence, state that the final result cannot support visual parity, then run one final `--include tech,layout,components,ux --max-resource-urls 50 --no-screenshot` attempt. Never synthesize a profile from partial chunks.
+
+For Agent Bridge E2E reports, record an evidence manifest outside the repository: browser/profile label, browser version, extension version, Agent Bridge status, target and final URL, command template, exit code, parsed stdout/stderr JSON, failure code, profile/result/screenshot paths, file sizes, SHA-256 hashes, `screenshotWritten`, `profileDownloadReady`, `techCount`, limitations, whether `--allow-private-network` was used, and uncovered risks. Never paste or commit `apiToken`, `bridgeToken`, nonce, token-bearing bridge URLs, `Authorization` headers, raw ready JSON, screenshot data URLs, cookies, credentials, signed URLs, account data, or unredacted `captureId`. Use `shasum -a 256` and `stat -f '%N %z bytes'` for artifact hashes and sizes, and redact `captureId` from any copied stdout summary.
 
 ## Security Notes
 

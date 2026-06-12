@@ -22,9 +22,25 @@ Do not use this skill for backend-only tasks, generic web search, SEO content ex
 - The user has installed the StackPrism extension in the browser profile that will open the bridge page.
 - StackPrism Agent Bridge is enabled in the extension settings for that local browser profile.
 - The target URL is `http:` or `https:`.
+- For local development targets, first confirm the dev server is running and the URL is reachable before starting the bridge helper.
 - Local development targets require both extension settings consent for all network targets and helper/request option `"allowPrivateNetworkTarget": true`.
+- Localhost support is only for public, demo, or explicitly desensitized development pages. Do not capture local, intranet, or internal pages that contain login state, account data, billing data, inbox content, customer data, or other private information.
 - Public hostnames routed through common local proxy/TUN fake-IP ranges such as `198.18.0.0/15` are supported by default. Direct private IPs, `localhost`, RFC1918, link-local, and other special-use targets still require `"allowPrivateNetworkTarget": true`.
 - If the user has enabled the extension's high-risk "allow all network targets" setting, still pass `--allow-private-network` for local development, direct private IP, or real intranet targets; the extension setting affects the browser-observed final target gate, while the helper's create-stage URL policy remains explicit per capture.
+
+## Private Page Boundary
+
+Do not run the helper or manual Bridge API against login-protected, account-specific, billing, admin, inbox, dashboard, internal, or private user pages, even when the user says they own the account. Screenshots are not pixel-redacted and profile summaries can still expose private text patterns.
+
+Use this refusal template:
+
+```text
+I cannot automatically capture that private or logged-in page with StackPrism. Please provide one of: a public demo URL, a desensitized test-environment URL, a user-supplied redacted screenshot or recording, a design brief, or an anonymized page-structure summary. I can use StackPrism only after the target is public or explicitly desensitized.
+```
+
+If the user provides a safe public demo or desensitized target, continue with the normal capture flow. Do not request screenshots for private pages, and do not add `--allow-private-network` as a workaround for privacy.
+
+If the user says the target is "the current browser page" but does not provide a URL, do not use `active_tab` or infer a target. Ask for a public or explicitly desensitized `http:` or `https:` URL first. Accept a user-provided redacted screenshot or recording only if the user has already removed private content; do not ask the user to create a screenshot of a private page for StackPrism capture.
 
 ## Preferred Capture Command
 
@@ -42,6 +58,21 @@ node agent-skill/stackprism-site-experience/scripts/capture-site.mjs \
 
 Set `STACKPRISM_BROWSER_OPEN_COMMAND` and `STACKPRISM_BROWSER_OPEN_ARGS_JSON` only when the default opener is not the browser/profile with StackPrism installed. On macOS, for example, use `STACKPRISM_BROWSER_OPEN_COMMAND=open` and `STACKPRISM_BROWSER_OPEN_ARGS_JSON='["-a","Google Chrome"]'` to force Chrome.
 
+For localhost or direct private-network development targets, use a full explicit command and record that the override was controlled:
+
+```bash
+cd <repo-root>
+STACKPRISM_BROWSER_OPEN_COMMAND="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+STACKPRISM_BROWSER_OPEN_ARGS_JSON='["--profile-directory=Default"]' \
+node agent-skill/stackprism-site-experience/scripts/capture-site.mjs \
+  --url http://127.0.0.1:5173/ \
+  --allow-private-network \
+  --out /tmp/stackprism-local-profile.json \
+  --result-out /tmp/stackprism-local-result.json \
+  --screenshot-out /tmp/stackprism-local-screenshot.jpg \
+  --include tech,visual,layout,components,interaction,ux,assets
+```
+
 The helper prints one JSON summary on stdout. On failure it writes one JSON error object to stderr with `error.code`, `error.message`, and sanitized `error.details`. `screenshotPresent` means the profile contains screenshot evidence; `screenshotWritten` means the screenshot image was written to `screenshotPath` and can be opened by image-capable coding tools. If `--screenshot-out` is omitted, the helper writes a sidecar image next to `--out` and rewrites the Profile screenshot reference to that local file URL before saving the JSON.
 
 Reference files are available for deeper consumption details. Read `references/site-experience-profile-schema.md` when implementing or validating Profile schema handling, and read `references/agent-consumption-guide.md` when translating a captured Profile into a target UI or app implementation.
@@ -57,6 +88,48 @@ Profile JSON is standard JSON and cannot contain comments. Screenshot handling i
 If the helper exits with `PRIVATE_NETWORK_TARGET_BLOCKED` for a local development, direct private IP, or real intranet target, first confirm the StackPrism settings page has the high-risk "allow all network targets" option enabled for this browser profile, then run a second fresh helper process with `--allow-private-network` and record that this was a controlled override. Do not reuse the first bridge URL, capture id, session, or token. Do not add `--allow-private-network` just because a public hostname is routed through `198.18.0.0/15`; that proxy/TUN case is allowed by default.
 
 If the helper exits with `CAPTURE_BUSY`, wait a few seconds, stop any bridge child process from that attempt, and run one fresh helper process. Do not keep polling an old capture after a terminal or stale status.
+
+For large-page transfer failures, use a bounded retry ladder instead of inventing partial results. On `BRIDGE_TRANSPORT_DISCONNECTED`, `PROFILE_TRANSPORT_FAILED`, `PROFILE_CHUNK_MISSING`, `CAPTURE_TIMEOUT`, or `BRIDGE_REQUEST_TIMEOUT`, stop the old bridge child process and start a fresh helper.
+
+Retry attempts must preserve the original capture context exactly: the same `TARGET_URL`, same `STACKPRISM_BROWSER_OPEN_COMMAND`, same `STACKPRISM_BROWSER_OPEN_ARGS_JSON`, same browser/profile, and same target policy flags such as `--allow-private-network`. If the first command used command-prefix env assignments, repeat those same assignments on every reduced retry. If it used `--allow-private-network`, keep `STACKPRISM_CAPTURE_TARGET_FLAGS='--allow-private-network'` or include the flag directly on every reduced retry. The only intended retry changes are `--include`, `--max-resource-urls`, and the final `--no-screenshot` boundary.
+
+First keep visual evidence but reduce high-volume sections:
+
+```bash
+cd <repo-root>
+# For public targets, leave STACKPRISM_CAPTURE_TARGET_FLAGS unset.
+# For original local/private attempts, set it to: --allow-private-network.
+# Repeat any original STACKPRISM_BROWSER_OPEN_COMMAND/ARGS_JSON env prefix here.
+node agent-skill/stackprism-site-experience/scripts/capture-site.mjs \
+  --url "$TARGET_URL" \
+  ${STACKPRISM_CAPTURE_TARGET_FLAGS:-} \
+  --out /tmp/stackprism-profile-retry-1.json \
+  --result-out /tmp/stackprism-result-retry-1.json \
+  --screenshot-out /tmp/stackprism-screenshot-retry-1.jpg \
+  --include tech,visual,layout,components,ux \
+  --max-resource-urls 150
+```
+
+If that still fails and the user accepts losing screenshot evidence, run one final reduced non-visual attempt, then stop and report the remaining failure:
+
+Before the final non-visual attempt, state this boundary explicitly: "I can retry without screenshot evidence, but the result can only support structural, technology, component, and limited UX findings; it cannot support visual parity or exact visual claims."
+
+```bash
+cd <repo-root>
+# Preserve the same browser/profile env and STACKPRISM_CAPTURE_TARGET_FLAGS.
+node agent-skill/stackprism-site-experience/scripts/capture-site.mjs \
+  --url "$TARGET_URL" \
+  ${STACKPRISM_CAPTURE_TARGET_FLAGS:-} \
+  --out /tmp/stackprism-profile-retry-2.json \
+  --result-out /tmp/stackprism-result-retry-2.json \
+  --include tech,layout,components,ux \
+  --max-resource-urls 50 \
+  --no-screenshot
+```
+
+Without `visualProfile` or screenshot evidence, only claim structural, technology, and limited UX findings from the returned sections. Do not claim visual parity, pixel-level accuracy, exact colors, exact spacing, or that missing visual elements do not exist.
+
+The current experience profile is passive. It can surface observed hover, focus, transition, animation, loading, scroll, and UX cues, but it does not click, type, submit forms, or exercise workflows. For interaction comparison, pair the profile with destination-app smoke tests and state which interactions were not actively exercised.
 
 When wrapping retries in shell scripts, avoid reserved or readonly shell variable names such as `status` in zsh. Use names like `capture_status` instead so a successful helper run is not masked by wrapper errors.
 
@@ -111,7 +184,7 @@ Call `POST /v1/captures` with `Authorization: Bearer {apiToken}`:
   "options": {
     "forceRefresh": false,
     "captureScreenshotMetadata": false,
-    "captureScreenshot": false,
+    "captureScreenshot": true,
     "keepTabOpen": false,
     "allowPrivateNetworkTarget": false,
     "targetMode": "reuse_or_new_tab",
@@ -126,13 +199,66 @@ Then poll `GET /v1/captures/{id}` and read `GET /v1/captures/{id}/profile` when 
 
 If the consuming model can read images, set `"captureScreenshot": true` with `include` containing `"visual"`. Chrome may capture the visible target viewport and the saved Profile will expose it as `visualProfile.screenshot.downloadUrl`, not as embedded base64. To inspect actual visual appearance, download or open that image. When using `capture-site.mjs`, the helper downloads the image while the bridge is still alive and rewrites `downloadUrl` to a local `file://` URL plus `localPath`; this remains available after the bridge exits as long as the file is not moved or deleted. When reading directly from the live bridge API or manually downloading from the bridge page, the screenshot URL is a temporary `127.0.0.1` endpoint and must be used before the local bridge exits or the capture result expires. The screenshot is not text-redacted pixel by pixel, so do not request it for login-protected or private user pages.
 
-Large pages can produce multi-chunk profile transfers. If the browser extension reports `BRIDGE_TRANSPORT_DISCONNECTED`, `PROFILE_TRANSPORT_FAILED`, `PROFILE_CHUNK_MISSING`, or `CAPTURE_TIMEOUT`, treat the capture as failed, stop the bridge child process, start a new bridge, and retry once with a smaller `--include` set or lower `--max-resource-urls`. For example, use `--include tech,visual,layout,components,ux` before dropping visual evidence entirely. Do not synthesize a profile from partial chunks.
+Large pages can produce multi-chunk profile transfers. If the browser extension reports `BRIDGE_TRANSPORT_DISCONNECTED`, `PROFILE_TRANSPORT_FAILED`, `PROFILE_CHUNK_MISSING`, or `CAPTURE_TIMEOUT`, treat the capture as failed and follow the bounded retry ladder above. Do not synthesize a profile from partial chunks.
 
 Handle user-actionable failures explicitly:
 
 - `AGENT_BRIDGE_DISABLED`: ask the user to enable Agent Bridge in the StackPrism settings for this local browser profile. Do not retry or fall back to a mock profile.
 - `EXTENSION_NOT_CONNECTED`: the opened browser/profile probably does not have StackPrism installed or enabled. Set `STACKPRISM_BROWSER_OPEN_COMMAND` and `STACKPRISM_BROWSER_OPEN_ARGS_JSON` for the correct Chrome, Edge, or Firefox profile.
 - `BROWSER_OPEN_FAILED`: surface the sanitized stderr/details and keep the capture failed. Do not ask the user to paste a token-bearing bridge URL.
+
+## E2E Evidence Manifest
+
+For Agent Bridge E2E validation, write evidence outside the repository or to an explicitly ignored artifact directory. Record this manifest shape in the report:
+
+- `browserName`, `browserVersion`, `profileIdentifier`, `extensionVersion`, and `agentBridgeEnabled`.
+- `targetUrl`, `finalUrl`, `privateNetworkOverrideUsed`, command template, exit code, and parsed stdout/stderr JSON status.
+- `errorCode`, `errorMessage`, and sanitized `error.details` when failed.
+- `profilePath`, `resultPath`, `screenshotPath`, file sizes, SHA-256 hashes, `screenshotWritten`, `profileDownloadReady`, `techCount`, `limitations`, and uncovered risks.
+
+Safe to report: sanitized error code/message/details, target/final URL after redaction, artifact paths outside the repo, hashes, file sizes, exit code, extension version, browser/profile label, and whether `--allow-private-network` was used.
+
+Never paste or commit: `apiToken`, `bridgeToken`, nonce, token-bearing bridge URLs, `Authorization` headers, raw ready JSON, raw profile JSON containing private content, screenshot data URLs, cookies, credentials, signed URLs, or account data. `captureId` may appear in local result artifacts, but redact it from public issue text and PR summaries unless it is needed for a local-only debug handoff.
+
+Collect file metadata with ordinary shell tools after the helper exits:
+
+```bash
+shasum -a 256 /tmp/stackprism-profile.json /tmp/stackprism-result.json /tmp/stackprism-screenshot.jpg
+stat -f '%N %z bytes' /tmp/stackprism-profile.json /tmp/stackprism-result.json /tmp/stackprism-screenshot.jpg
+```
+
+Use this public report template instead of pasting raw stdout:
+
+```json
+{
+  "browserName": "Chrome",
+  "browserVersion": "recorded separately",
+  "profileIdentifier": "Default",
+  "extensionVersion": "1.3.74",
+  "agentBridgeEnabled": true,
+  "targetUrl": "https://target.example/",
+  "finalUrl": "https://target.example/",
+  "privateNetworkOverrideUsed": false,
+  "exitCode": 0,
+  "stdout": {
+    "ok": true,
+    "captureId": "[redacted]",
+    "screenshotWritten": true,
+    "profileDownloadReady": true,
+    "techCount": 0
+  },
+  "artifacts": {
+    "profilePath": "/tmp/stackprism-profile.json",
+    "resultPath": "/tmp/stackprism-result.json",
+    "screenshotPath": "/tmp/stackprism-screenshot.jpg",
+    "sha256": ["recorded separately"],
+    "fileSizes": ["recorded separately"]
+  },
+  "limitations": []
+}
+```
+
+If browser/profile identity matters for the E2E claim, record one non-sensitive proof such as the browser name/version from the browser UI or CLI, the profile label used in `STACKPRISM_BROWSER_OPEN_ARGS_JSON`, the StackPrism extension version shown on the extension details page, and the Agent Bridge enabled state shown in StackPrism settings. Do not include extension internal UUIDs, bridge URLs, or tokens.
 
 ## Use The Profile
 
