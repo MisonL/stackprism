@@ -18,7 +18,7 @@
             {
               "name": "Vue",
               "patterns": ["vue(?:\\.runtime)?(?:\\.global)?(?:\\.prod)?(?:\\.min)?\\.js", "vue-router", "pinia"],
-              "globals": ["Vue"],
+              "globals": ["Vue", "__VUE_DEVTOOLS_GLOBAL_HOOK__"],
               "selectors": ["[data-v-app]", "#app.__vue__"]
             },
             {
@@ -63,6 +63,17 @@
           "confidence": "高",
           "patterns": ["/_astro/", "astro\\."],
           "selectors": ["astro-island", "astro-slot"]
+        },
+        {
+          "name": "Flutter",
+          "url": "https://flutter.dev",
+          "confidence": "高",
+          "patterns": [
+            "(?:^|/)(?:main\\.dart\\.js|flutter\\.js|flutter_bootstrap\\.js)(?:[?#]|$)",
+            "<meta[^>]+name=[\"']generator[\"'][^>]+content=[\"']Flutter[\"']",
+            "<flutter-view\\b"
+          ],
+          "selectors": ["flutter-view"]
         },
         {
           "name": "Ember.js",

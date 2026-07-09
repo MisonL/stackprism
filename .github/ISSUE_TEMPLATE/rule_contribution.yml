@@ -1,7 +1,7 @@
 name: 规则贡献
 description: 贡献新的技术识别规则，或修正已有规则。
 title: 'rule: '
-labels: ['rule', 'contribution']
+labels: ['rule']
 body:
   - type: markdown
     attributes:

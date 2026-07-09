@@ -463,7 +463,7 @@
             "patterns": [
               "(?:^|/)react-router(?:-dom)?(?:@[\\d.]+)?(?:/[^\\s\"'<>]+)?\\.(?:m?js|cjs)(?:[?#\"'<>\\s]|$)"
             ],
-            "globals": ["ReactRouter", "ReactRouterDOM"]
+            "globals": ["ReactRouter", "ReactRouterDOM", "__reactRouterVersion"]
           },
           {
             "name": "Anime.js",
@@ -676,6 +676,24 @@
           {
             "name": "Snowpack",
             "patterns": ["snowpack|\\/_snowpack\\/"]
+          }
+        ]
+      },
+      {
+        "defaults": {
+          "category": "前端库",
+          "confidence": "高"
+        },
+        "rules": [
+          {
+            "name": "highlight.js",
+            "matchIn": ["html"],
+            "classPrefixes": ["hljs"]
+          },
+          {
+            "name": "tsparticles",
+            "matchIn": ["html"],
+            "selectors": ["canvas.tsparticles-canvas-el"]
           }
         ]
       }
