@@ -13,7 +13,10 @@ hero:
       text: 安装与启用
       link: /guide/install
     - theme: alt
-      text: 在 GitHub 上查看
+      text: 当前 fork
+      link: https://github.com/MisonL/stackprism
+    - theme: alt
+      text: 上游仓库
       link: https://github.com/setube/stackprism
 
 features:
@@ -39,7 +42,7 @@ features:
 
 ## 这是什么
 
-StackPrism 是一个 Chromium MV3 扩展。它不“看穿”服务器内部，只整理浏览器能看到的线索：脚本和样式资源、DOM 标记、全局变量、响应头、动态加载的资源、WordPress 主题样式表等。
+StackPrism 是一个 Chrome / Edge / Firefox 128+ MV3 扩展。它不“看穿”服务器内部，只整理浏览器能看到的线索：脚本和样式资源、DOM 标记、全局变量、响应头、动态加载的资源、WordPress 主题样式表等。
 
 每条结果都会标注**置信度**、**证据**和**来源**。如果某个结果看起来不对，可以先看证据，再点来源展开对应的原始 JSON。
 

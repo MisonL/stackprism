@@ -16,9 +16,13 @@ Agent Bridge 让本机 AI Agent 在用户已安装并显式启用 StackPrism 扩
 
 `agentBridgeEnabled` 是本机浏览器 profile 级 opt-in，只从 `chrome.storage.local` 生效。即使旧 `chrome.storage.sync` 中存在同名字段，也不得自动开启 Agent Bridge。
 
-`agentBridgeAllowAllNetworkTargets` 是同样只存在当前浏览器 profile 的高风险开关，默认关闭。用户在设置页保存开启时必须人工确认；开启后，扩展侧会允许 Agent Bridge 继续采集本机、私网、保留地址以及 DNS/proxy 映射到私网的目标。该开关不放开 `http:` / `https:` 之外的协议、不允许采集当前 bridge server 自身，也不改变本地 bridge 进程的创建阶段策略；repo-local helper 仍需显式传入 `--allow-private-network` 或 request option 才会在创建阶段接受私网目标。
+Firefox 数据收集同意不是当前包的默认独立门禁。`src/utils/firefox-data-consent.ts` 只有在 manifest 的 `browser_specific_settings.gecko.data_collection_permissions.optional` 同时声明 `browsingActivity`、`technicalAndInteraction`、`websiteContent`，且浏览器 permissions API 能返回 `data_collection` 数组时，才会把缺失同意视为阻断；声明不完整或 API 不可用会按 unsupported 处理，不额外阻断。当前 `build-scripts/package-firefox.mjs` 不写该 manifest 字段，因此当前 Firefox 临时包的运行时有效门禁仍是 `agentBridgeEnabled`、网络目标策略和一次性 bridge session。若未来 Firefox 签名版本声明这三类权限，必须同步设置页授权、失败文案、AMO 披露和回归测试。
 
-发布到 Chrome Web Store 或 Edge Add-ons 前，默认值必须保持 `false`，除非维护者完成隐私披露、用户文档和发布说明更新。
+当前缺少 Firefox 数据收集同意时，capture 返回的错误码仍是 `AGENT_BRIDGE_DISABLED`，错误 message 会区分 data transfer permission 与普通 opt-in 未启用。排障时不能只看错误码，需要同时看 message。
+
+`agentBridgeAllowAllNetworkTargets` 是同样只存在当前浏览器 profile 的高风险开关，默认关闭。用户在设置页保存开启时必须人工确认；开启后，扩展侧会允许 Agent Bridge 继续采集本机、私网、保留地址以及 DNS/proxy 映射到私网的目标。该开关不放开 `http:` / `https:` 之外的协议、不允许采集当前 bridge server 自身，也不改变本地 bridge 进程的创建阶段策略；repo-local JS helper 仍需显式传入 `--allow-private-network`，Python fallback 或直接调用 bridge API 时需要在 capture request 中设置 `options.allowPrivateNetworkTarget = true`，创建阶段才会接受私网目标。
+
+发布到 Chrome Web Store、Edge Add-ons 或实际上架 Firefox Add-ons 前，默认值必须保持 `false`，除非维护者完成对应渠道的隐私披露、用户文档和发布说明更新。
 
 发布前 disclosure 必须覆盖：
 
@@ -122,12 +126,13 @@ smoke 结果按三类理解：
 
 以下 gate 不能仅凭本机单测或 fixture smoke 标记完成：
 
-- Chrome Web Store / Edge Add-ons 真实发布、升级链路和审核后台 disclosure 接受状态。
-- 运行中 capture 的 Chrome service worker 自然 idle eviction 精确触发。本机已有 fail-closed cleanup 证据，但当前 Chrome 行为未稳定触发该 live 分支。
+- Chrome Web Store / Edge Add-ons / 实际使用的 Firefox Add-ons 真实发布、升级链路和审核后台 disclosure 接受状态；未上架 AMO 的版本应记录为 N/A。
+- 运行中 capture 的 Chromium service worker 自然 idle eviction 精确触发。本机已有 fail-closed cleanup 证据，但当前 Chromium 行为未稳定触发该 live 分支。
+- Firefox `background.js` scripts 的重载、临时加载移除和签名安装/卸载边界，需要按 Firefox 包单独验证，不能用 Chromium service worker idle gate 代替。
 - incognito bridge 或 target tab 的精确 `INCOGNITO_NOT_SUPPORTED` live metadata 分支。当前单元测试覆盖该分支，CDP/`--incognito` probes 在本机表现为 `EXTENSION_NOT_CONNECTED` fail-closed skip。
 - 多网络、多 DNS、多目标站点的长时资源压力矩阵。
 
-发布 workflow 会在打包前检查 Agent Bridge 是否出现在 `dist/manifest.json` 的 loopback content script 或 loopback web accessible resource 中。若出现，则必须通过 workflow_dispatch 输入 `agent_bridge_disclosure_confirmed=true`，或在 GitHub Release 正文中包含已勾选的 `- [x] Agent Bridge disclosure confirmed`；否则工作流失败。该门禁只能防止未确认披露就上传 release 资产，不能替代 Chrome Web Store / Edge Add-ons 后台的真实审核和发布状态。
+发布 workflow 会在打包前检查 Agent Bridge 是否出现在 `dist/manifest.json` 的 loopback content script 或 loopback web accessible resource 中。若出现，则必须通过 workflow_dispatch 输入 `agent_bridge_disclosure_confirmed=true`，或在 GitHub Release 正文中包含已勾选的 `- [x] Agent Bridge disclosure confirmed`；否则工作流失败。该门禁只能防止未确认披露就上传 release 资产，不能替代 Chrome Web Store / Edge Add-ons / 实际使用的 Firefox Add-ons 后台的真实审核和发布状态。
 
 ## 验证命令
 

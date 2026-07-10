@@ -72,9 +72,15 @@ React                                         [高置信度]
 
 ## Agent Bridge
 
-Agent Bridge 是面向本机 AI Agent 的可选能力。启用后，本机 Agent 可以通过 `127.0.0.1` bridge 读取当前浏览器可观测的技术栈、视觉、布局、组件、交互和资源摘要，用于生成相似体验的实现方案。
+Agent Bridge 是当前 fork 源码构建版面向本机 AI Agent 的可选能力。启用后，本机 Agent 可以通过 `127.0.0.1` bridge 读取当前浏览器可观测的技术栈、视觉、布局、组件、交互和资源摘要，用于生成相似体验的实现方案。
+
+如果设置页没有 Agent Bridge 卡片，说明当前安装版本不包含这项能力，需改用当前 fork 的源码构建版。
+
+repo-local skill 和 bridge helper 不随扩展安装，需要保留仓库目录供本机 Agent 执行。
 
 该能力默认关闭，需要在设置页显式开启。启用状态只保存在当前浏览器 profile 的本机 `chrome.storage.local`，不会随 Chrome sync 同步到其他设备或其他 profile；换设备、换浏览器 profile 或重装扩展后需要重新开启。
+
+Firefox 临时加载版当前没有写入 Firefox `browser_specific_settings.gecko.data_collection_permissions.optional` manifest 字段，运行时以设置页显式开启作为有效门禁。若后续正式 Firefox 版本完整声明 Agent Bridge 所需数据收集权限，浏览器可能还会要求额外同意；未同意时采集会被拒绝。
 
 如果需要采集本机开发站点、内网、保留地址，或当前 DNS/proxy 会把公网域名映射到私网地址，可以在设置页人工确认开启“允许所有网络目标”。该开关仅放开 Agent Bridge 网络目标门禁，不改变 `http:` / `https:` 协议限制，也不允许采集 bridge 页面自身。
 

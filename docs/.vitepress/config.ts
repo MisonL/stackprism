@@ -15,7 +15,8 @@ export default defineConfig({
       { text: '使用指南', link: '/guide/' },
       { text: '配置指南', link: '/config/' },
       { text: '开发手册', link: '/dev/' },
-      { text: 'GitHub', link: 'https://github.com/setube/stackprism' }
+      { text: '当前 fork', link: 'https://github.com/MisonL/stackprism' },
+      { text: '上游仓库', link: 'https://github.com/setube/stackprism' }
     ],
     sidebar: {
       '/guide/': [
@@ -58,7 +59,7 @@ export default defineConfig({
         }
       ]
     },
-    socialLinks: [{ icon: 'github', link: 'https://github.com/setube/stackprism' }],
+    socialLinks: [{ icon: 'github', link: 'https://github.com/MisonL/stackprism' }],
     footer: {
       message: '基于 CC BY-NC-SA 4.0 协议发布',
       copyright: 'Copyright © 2026 StackPrism'

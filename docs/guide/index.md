@@ -4,7 +4,7 @@
 
 ## 章节
 
-- [安装与启用](./install.md) — 三种安装方式（Chrome Web Store、Edge 商店、本地加载）
+- [安装与启用](./install.md) — 商店安装、Release、源码构建、Chrome / Edge / Firefox 本地加载
 - [基本使用](./basic-usage.md) — 弹窗里五个区域是干什么的
 - [结果解读](./results.md) — 置信度、证据、来源、纠正按钮怎么看
 - [辅助工具](./tools.md) — 网页源代码搜索、原始线索面板、复制完整技术栈报告
