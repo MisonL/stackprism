@@ -17,11 +17,21 @@
 
 </div>
 
+## 当前 fork 相对上游的新增能力
+
+本项目基于 [上游 StackPrism](https://github.com/setube/stackprism)，保留原有网页技术栈识别能力，并在当前源码构建版中增加：
+
+- **Agent Bridge**：用户显式开启后，本机 AI Agent 可通过 `127.0.0.1` bridge 发起一次性站点采集任务；该能力默认关闭，不对外网开放。
+- **站点体验 Profile**：除技术栈外，还可输出视觉、布局、组件、交互、UX 和资源摘要，并支持按需采集截图、下载结构化 JSON 与图片文件。
+- **repo-local Agent skill**：提供 Node.js bridge、Python fallback 和一键采集脚本，供本机 Agent 直接生成 `stackprism.site_experience_profile.v1`。
+- **采集安全与生命周期保护**：增加本机 opt-in、目标与最终 URL 校验、私网策略、一次性会话绑定、分片哈希校验、超时取消、扩展重启后的失败闭环和敏感信息脱敏。
+- **Agent Bridge 跨浏览器交付**：补充 Chromium 与 Firefox 128+ 下的 bridge content script、数据收集同意兼容、构建打包和发布产物卫生检查。
+
+上方 Chrome Web Store / Edge Add-ons 徽章和上游 Release 指向上游公开版本，不代表已包含这些 fork 增量。要使用上述能力，请从当前仓库源码构建并加载扩展。
+
 ## 简介
 
 StackPrism 是一款基于 **Manifest V3** 的网页技术栈识别扩展，支持 **Chrome / Edge / Firefox 128+**。它从页面运行时、DOM、资源 URL、响应头、动态资源和 JS 版权注释中收集证据，把前端、后端、CDN、SaaS、统计、支付、登录、CMS 等线索按类目展示。
-
-上方 Chrome Web Store / Edge Add-ons 徽章指向上游公开商店版，适合普通技术栈识别；是否包含 Agent Bridge 以对应发布版本为准。当前 fork 的源码构建版包含 Agent Bridge；repo-local skill 和 bridge helper 保留在仓库内供本机 Agent 调用，不随扩展安装。
 
 检测链路分成 4 个互补通道：
 
