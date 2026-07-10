@@ -349,6 +349,7 @@
   import { cycleTheme, getStoredTheme, setStoredTheme, themeLabel, type ThemeMode } from '@/utils/theme'
   import { checkPageSupport } from '@/utils/page-support'
   import { formatTechStackReport } from '@/utils/format-tech-stack'
+  import { sendMessage } from '@/utils/messaging'
 
   const RAW_LOADING_TEXT = '正在请求原始线索...'
 
@@ -648,19 +649,19 @@
   }
 
   const requestPopupResult = async (tabId: number) => {
-    const response = await chrome.runtime.sendMessage({ type: 'GET_POPUP_RESULT', tabId })
+    const response = await sendMessage({ type: 'GET_POPUP_RESULT', tabId })
     if (!response?.ok) throw new Error(response?.error || '后台没有返回结果')
     return response
   }
 
   const requestPopupRawResult = async (tabId: number) => {
-    const response = await chrome.runtime.sendMessage({ type: 'GET_POPUP_RAW_RESULT', tabId })
+    const response = await sendMessage({ type: 'GET_POPUP_RAW_RESULT', tabId })
     if (!response?.ok) throw new Error(response?.error || '后台没有返回原始线索')
     return response.data || {}
   }
 
   const requestBackgroundDetection = (tabId: number) => {
-    chrome.runtime.sendMessage({ type: 'START_BACKGROUND_DETECTION', tabId }).catch(() => {})
+    sendMessage({ type: 'START_BACKGROUND_DETECTION', tabId }).catch(() => {})
   }
 
   const clearCacheRefreshTimer = () => {

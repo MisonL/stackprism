@@ -1,6 +1,7 @@
 import { isDetectablePageUrl } from '@/utils/page-support'
 import { runContentObserver } from '@/content/content-observer'
 import { runAgentBridgeClient } from '@/content/agent-bridge-client'
+import { installRuntimeMessaging } from '@/utils/messaging'
 import { sanitizeLogDetails } from './logging'
 import { isScriptFileLoadError } from './script-injection-errors'
 
@@ -47,22 +48,23 @@ const executeScriptFile = async (tabId: number, file: string): Promise<void> => 
   throw lastError || new Error('SCRIPT_INJECTION_FAILED')
 }
 
-const executeAgentBridgeClientFunction = async (tabId: number): Promise<void> => {
+const executeScriptFunction = async (tabId: number, func: () => void | Promise<void>): Promise<void> => {
   const results = await chrome.scripting.executeScript({
     target: { tabId },
-    func: runAgentBridgeClient
+    func
   })
   const frameError = (results as Array<{ error?: unknown }>).find(result => result.error !== undefined)?.error
   if (frameError) throw new Error(String(frameError))
 }
 
+const executeAgentBridgeClientFunction = async (tabId: number): Promise<void> => {
+  await executeScriptFunction(tabId, installRuntimeMessaging)
+  await executeScriptFunction(tabId, runAgentBridgeClient)
+}
+
 const executeContentObserverFunction = async (tabId: number): Promise<void> => {
-  const results = await chrome.scripting.executeScript({
-    target: { tabId },
-    func: runContentObserver
-  })
-  const frameError = (results as Array<{ error?: unknown }>).find(result => result.error !== undefined)?.error
-  if (frameError) throw new Error(String(frameError))
+  await executeScriptFunction(tabId, installRuntimeMessaging)
+  await executeScriptFunction(tabId, runContentObserver)
 }
 
 export const getContentObserverFile = (): string | undefined => getContentScriptFile(CONTENT_OBSERVER_FILE_PATTERN)

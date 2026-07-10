@@ -8,6 +8,7 @@ import type {
   AgentProfileTransferCompleteMessage,
   SiteExperienceProfile
 } from '@/types/agent-bridge'
+import { installRuntimeMessaging } from '@/utils/messaging'
 
 const errorFromUnknown = (error: unknown, fallback: AgentBridgeError['code']): AgentBridgeError => {
   const bridgeError = (error as { bridgeError?: AgentBridgeError } | null)?.bridgeError
@@ -31,6 +32,22 @@ export const runAgentBridgeClient = async (): Promise<void> => {
   type StatusPoster = (status: AgentCaptureStatus, phase?: string, error?: AgentBridgeError) => Promise<void>
   type BridgeRequester = (path: string, init?: RequestInit) => Promise<any>
   type TransferResponse = { ok: true; data: null } | { ok: false; error: AgentBridgeError }
+  type InlineRuntimeMessaging = {
+    sendMessage: (message: AgentBridgeRuntimeMessage, runtime?: typeof chrome.runtime) => Promise<any>
+    addListener: (
+      listener: (
+        message: AgentBridgeRuntimeMessage,
+        sender: chrome.runtime.MessageSender,
+        sendResponse: (response?: unknown) => void
+      ) => boolean | void
+    ) => void
+    connect: (name: string) => chrome.runtime.Port
+    postPortMessage: (port: chrome.runtime.Port, message: AgentBridgeRuntimeMessage) => void
+    addPortMessageListener: (
+      port: chrome.runtime.Port,
+      listener: (message: AgentBridgeRuntimeMessage, port: chrome.runtime.Port) => void
+    ) => void
+  }
   type TransferState = {
     chunks: Array<Uint8Array | null>
     byteLength: number
@@ -38,6 +55,22 @@ export const runAgentBridgeClient = async (): Promise<void> => {
     chunkCount: number
     nextChunkIndex: number
     sha256: string
+  }
+
+  const getRuntimeMessaging = (): InlineRuntimeMessaging => {
+    const scope = globalThis as typeof globalThis & { __stackPrismRuntimeMessaging__?: InlineRuntimeMessaging }
+    const transport = scope.__stackPrismRuntimeMessaging__
+    if (
+      transport &&
+      typeof transport.sendMessage === 'function' &&
+      typeof transport.addListener === 'function' &&
+      typeof transport.connect === 'function' &&
+      typeof transport.postPortMessage === 'function' &&
+      typeof transport.addPortMessageListener === 'function'
+    ) {
+      return transport
+    }
+    throw new Error('RUNTIME_MESSAGING_UNAVAILABLE')
   }
 
   const bridgeProtocolVersion = 1 as const
@@ -186,7 +219,9 @@ export const runAgentBridgeClient = async (): Promise<void> => {
       if (!kind || values[name] !== undefined || !validateProtocolIdentifier(kind, value)) return null
       values[name] = value
     }
-    return values.session && values.capture && values.nonce ? { session: values.session, capture: values.capture, nonce: values.nonce } : null
+    return values.session && values.capture && values.nonce
+      ? { session: values.session, capture: values.capture, nonce: values.nonce }
+      : null
   }
   const parseBridgePageContext = (href: string, configText: string): BridgePageContext => {
     const url = new URL(href)
@@ -350,16 +385,13 @@ export const runAgentBridgeClient = async (): Promise<void> => {
     error.bridgeError = makeError(code, 'Agent Bridge extension transport is unavailable.', { transport: 'chrome.runtime.sendMessage' })
     return error
   }
-  const sendRuntimeMessage = (message: AgentBridgeRuntimeMessage, failureCode: AgentBridgeError['code']): Promise<any> =>
-    new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage(message, response => {
-        if (chrome.runtime.lastError) {
-          reject(runtimeTransportError(failureCode))
-          return
-        }
-        resolve(response)
-      })
-    })
+  const sendRuntimeMessage = async (message: AgentBridgeRuntimeMessage, failureCode: AgentBridgeError['code']): Promise<any> => {
+    try {
+      return await getRuntimeMessaging().sendMessage(message)
+    } catch {
+      throw runtimeTransportError(failureCode)
+    }
+  }
   const isStatusMessageForContext = (context: BridgePageContext, message: AgentBridgeRuntimeMessage): boolean =>
     message.type === 'AGENT_CAPTURE_STATUS' &&
     message.payload?.captureId === context.captureId &&
@@ -400,7 +432,7 @@ export const runAgentBridgeClient = async (): Promise<void> => {
     postStatus: (status: AgentCaptureStatus, phase?: string, error?: AgentBridgeError, extra?: Record<string, unknown>) => Promise<void>,
     stopControlPolling: () => void
   ) => {
-    chrome.runtime.onMessage.addListener((message: AgentBridgeRuntimeMessage, _sender, sendResponse) => {
+    getRuntimeMessaging().addListener((message: AgentBridgeRuntimeMessage, _sender, sendResponse) => {
       if (message?.type !== 'AGENT_CAPTURE_STATUS') return false
       if (!isStatusMessageForContext(context, message)) {
         sendResponse({ ok: false, error: makeError('BRIDGE_REQUEST_MISMATCH', 'Agent capture status context mismatch.') })
@@ -413,7 +445,9 @@ export const runAgentBridgeClient = async (): Promise<void> => {
         targetNetworkFromCache: message.payload.targetNetworkFromCache
       })
         .then(() => sendResponse({ ok: true, data: null }))
-        .catch(error => sendResponse({ ok: false, error: error.bridgeError || runtimeErrorFromUnknown(error, 'BRIDGE_TRANSPORT_DISCONNECTED') }))
+        .catch(error =>
+          sendResponse({ ok: false, error: error.bridgeError || runtimeErrorFromUnknown(error, 'BRIDGE_TRANSPORT_DISCONNECTED') })
+        )
       return true
     })
   }
@@ -440,7 +474,10 @@ export const runAgentBridgeClient = async (): Promise<void> => {
     return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('')
   }
   const validateTransferMessage = (context: BridgeTransferContext, message: AgentBridgeRuntimeMessage): boolean =>
-    'captureId' in message && message.captureId === context.captureId && message.sessionId === context.sessionId && message.nonce === context.nonce
+    'captureId' in message &&
+    message.captureId === context.captureId &&
+    message.sessionId === context.sessionId &&
+    message.nonce === context.nonce
   const validateTransferId = (message: AgentBridgeRuntimeMessage): boolean =>
     'profileTransferId' in message && PROFILE_TRANSFER_ID_PATTERN.test(message.profileTransferId)
   const clearTransfer = (message: AgentBridgeRuntimeMessage): void => {
@@ -578,28 +615,34 @@ export const runAgentBridgeClient = async (): Promise<void> => {
       state.nextChunkIndex += 1
       return { ok: true, data: null }
     }
-    if (message.type === 'AGENT_PROFILE_TRANSFER_COMPLETE') return completeProfileTransfer(context, postStatus, requestJsonForTransfer, message)
+    if (message.type === 'AGENT_PROFILE_TRANSFER_COMPLETE')
+      return completeProfileTransfer(context, postStatus, requestJsonForTransfer, message)
     return { ok: false, error: makeError('PROFILE_TRANSPORT_FAILED', 'Unsupported profile transfer message.') }
   }
-  const registerProfileTransferListener = (context: BridgeTransferContext, postStatus: StatusPoster, requestJsonForTransfer: BridgeRequester) => {
-    const port = chrome.runtime.connect({ name: AGENT_PROFILE_TRANSFER_PORT })
+  const registerProfileTransferListener = (
+    context: BridgeTransferContext,
+    postStatus: StatusPoster,
+    requestJsonForTransfer: BridgeRequester
+  ) => {
+    const port = getRuntimeMessaging().connect(AGENT_PROFILE_TRANSFER_PORT)
     let terminal = false
-    port.postMessage({
+    getRuntimeMessaging().postPortMessage(port, {
       type: 'AGENT_PROFILE_TRANSFER_PORT_HELLO',
       captureId: context.captureId,
       sessionId: context.sessionId,
       nonce: context.nonce,
       protocolVersion: bridgeProtocolVersion
     })
-    port.onMessage.addListener((message: AgentBridgeRuntimeMessage) => {
+    getRuntimeMessaging().addPortMessageListener(port, (message: AgentBridgeRuntimeMessage) => {
       if (!message?.type || !message.type.startsWith('AGENT_PROFILE_TRANSFER_') || message.type === 'AGENT_PROFILE_TRANSFER_ACK') return
       handleTransferMessage(context, postStatus, requestJsonForTransfer, message)
         .then(response => {
           if (message.type === 'AGENT_PROFILE_TRANSFER_COMPLETE' && response.ok) terminal = true
-          port.postMessage(toAckMessage(context, message, response))
+          getRuntimeMessaging().postPortMessage(port, toAckMessage(context, message, response))
         })
         .catch(error =>
-          port.postMessage(
+          getRuntimeMessaging().postPortMessage(
+            port,
             toAckMessage(context, message, {
               ok: false,
               error: makeError(
@@ -736,6 +779,7 @@ export const runAgentBridgeClient = async (): Promise<void> => {
 }
 
 if (typeof window !== 'undefined' && typeof document !== 'undefined' && typeof chrome !== 'undefined' && chrome.runtime) {
+  installRuntimeMessaging()
   runAgentBridgeClient().catch(error => {
     console.error('[StackPrism Agent Bridge] runAgentBridgeClient failed', {
       errorCode: errorFromUnknown(error, 'PROFILE_TRANSPORT_FAILED').code

@@ -42,7 +42,7 @@ export interface AgentCaptureState {
   targetMode: string
   createdByCapture: boolean
   keepTabOpen: boolean
-  phase: string
+  phase: AgentCapturePhase
   status: AgentCaptureStatus
   startedAt: number
   targetNetworkObservedAfter?: number

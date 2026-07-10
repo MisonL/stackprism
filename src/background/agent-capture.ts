@@ -219,7 +219,7 @@ export const handleAgentBridgeDataConsentRemoved = async (): Promise<void> =>
   failActiveAgentCapturesForBridgeDisabled('Agent Bridge data transfer permission was removed in this browser profile.')
 
 export const startAgentCapture = async (
-  message: StartAgentCaptureMessage & Record<string, unknown>,
+  message: StartAgentCaptureMessage,
   sender: chrome.runtime.MessageSender
 ): Promise<AgentCaptureResponse> => {
   await waitForStartupRecoveryGate()

@@ -11,6 +11,7 @@ import {
 } from './agent-capture-common'
 import type { AgentBridgeRuntimeMessage, AgentProfileTransferAckMessage, SiteExperienceProfile } from '@/types/agent-bridge'
 import { AGENT_PROFILE_TRANSFER_PORT, bridgeProtocolVersion } from '@/types/agent-bridge'
+import { postPortMessage, registerPortMessageListener } from '@/utils/messaging'
 import { logBackgroundError } from './logging'
 
 type ProfileTransferPortRecord = {
@@ -81,12 +82,11 @@ export const registerAgentProfileTransferPort = (port: chrome.runtime.Port): voi
     return
   }
   let registeredKey = ''
-  port.onMessage.addListener((message: AgentBridgeRuntimeMessage) => {
+  registerPortMessageListener(port, (message: AgentBridgeRuntimeMessage) => {
     if (message?.type === 'AGENT_PROFILE_TRANSFER_PORT_HELLO') {
       registerPortHello(port, message, key => {
         registeredKey = key
-      })
-        .catch(() => port.disconnect())
+      }).catch(() => port.disconnect())
       return
     }
     if (message?.type !== 'AGENT_PROFILE_TRANSFER_ACK' || !registeredKey) return
@@ -190,7 +190,7 @@ const postProfileTransferMessage = async (
     }, PROFILE_TRANSFER_DEADLINE_MS)
     pendingProfileAcks.set(key, { resolve, reject, timeout })
     try {
-      record.port.postMessage(message)
+      postPortMessage(record.port, message)
     } catch (caught) {
       pendingProfileAcks.delete(key)
       clearTimeout(timeout)

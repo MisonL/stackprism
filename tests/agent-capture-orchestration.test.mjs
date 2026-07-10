@@ -4395,7 +4395,7 @@ test('content injector normalizes firefox manifest script URLs and retries root 
     await injectAgentBridgeClient(1, { failOnError: true })
 
     assert.deepEqual(
-      calls.map(call => call.files?.[0]),
+      calls.filter(call => call.files?.[0]?.includes('agent-bridge-client.ts-unit.js')).map(call => call.files?.[0]),
       ['assets/agent-bridge-client.ts-unit.js', '/assets/agent-bridge-client.ts-unit.js']
     )
   } finally {
@@ -4430,7 +4430,10 @@ test('content injector falls back to inline bridge client when firefox cannot lo
       calls.filter(call => call.files?.[0]?.includes('agent-bridge-client.ts-unit.js')).map(call => call.files?.[0]),
       ['assets/agent-bridge-client.ts-unit.js', '/assets/agent-bridge-client.ts-unit.js']
     )
-    assert.equal(calls.filter(call => call.func?.name === 'runAgentBridgeClient').length, 1)
+    assert.deepEqual(
+      calls.filter(call => call.func).map(call => call.func.name),
+      ['installRuntimeMessaging', 'runAgentBridgeClient']
+    )
   } finally {
     delete globalThis.chrome
     resetLoadTsModuleCaches()
@@ -4570,7 +4573,10 @@ test('content injector falls back to inline observer when firefox cannot load sc
         .map(call => call.files?.[0]),
       ['assets/content-observer.ts-unit.js', '/assets/content-observer.ts-unit.js']
     )
-    assert.equal(calls.filter(call => call.target?.tabId === 91 && call.func?.name === 'runContentObserver').length, 1)
+    assert.deepEqual(
+      calls.filter(call => call.target?.tabId === 91 && call.func).map(call => call.func.name),
+      ['installRuntimeMessaging', 'runContentObserver']
+    )
   } finally {
     delete globalThis.chrome
     resetLoadTsModuleCaches()

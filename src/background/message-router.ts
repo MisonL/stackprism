@@ -18,6 +18,7 @@ import { isAgentBridgeRequestForTab, isAgentBridgeTab } from './agent-bridge-tab
 import { withTabWriteLock } from './tab-write-lock'
 import { logBackgroundError } from './logging'
 import { checkPageSupport, isDetectablePageUrl } from '@/utils/page-support'
+import { registerConnectListener, registerMessageListener } from '@/utils/messaging'
 import type { AgentBridgeError } from '@/types/agent-bridge'
 
 const clearUnsupportedTab = async (tabId: number) => {
@@ -98,9 +99,9 @@ const runBackgroundDetectionAfterResponse = async (tabId: number): Promise<void>
 }
 
 export const registerMessageRouter = () => {
-  chrome.runtime.onConnect.addListener(registerAgentProfileTransferPort)
+  registerConnectListener(registerAgentProfileTransferPort)
 
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  registerMessageListener((message, sender, sendResponse) => {
     if (!message || !message.type) return false
 
     if (message.type === 'AGENT_BRIDGE_HELLO') {

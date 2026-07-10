@@ -1,4 +1,6 @@
 // @ts-nocheck
+import { installRuntimeMessaging } from '@/utils/messaging'
+
 export const runContentObserver = () => {
   const isStackPrismAgentBridgeUrl = () => {
     if (location.protocol !== 'http:' || location.hostname !== '127.0.0.1' || location.pathname !== '/bridge') return false
@@ -24,6 +26,11 @@ export const runContentObserver = () => {
 
   if (isStackPrismAgentBridgeUrl()) {
     return
+  }
+
+  const getRuntimeMessaging = () => {
+    const transport = globalThis.__stackPrismRuntimeMessaging__
+    return transport && typeof transport.sendMessage === 'function' ? transport : null
   }
 
   const MAX_ITEMS = 300
@@ -161,14 +168,6 @@ export const runContentObserver = () => {
   }
 
   const isExtensionContextInvalidated = error => CONTEXT_INVALIDATED_PATTERN.test(String(error?.message || error))
-
-  const getRuntimeLastError = () => {
-    try {
-      return chrome?.runtime?.lastError || null
-    } catch (error) {
-      return error
-    }
-  }
 
   const addUrl = (key, value) => {
     if (!value) return false
@@ -367,7 +366,8 @@ export const runContentObserver = () => {
   const sendSnapshot = () => {
     perfMark('sp:send-start')
     const runtime = getRuntime()
-    if (stopped || !runtime) {
+    const messaging = getRuntimeMessaging()
+    if (stopped || !runtime || !messaging) {
       stopObserver()
       return
     }
@@ -382,16 +382,7 @@ export const runContentObserver = () => {
       feedLinks: state.feedLinks.map(link => ({ ...link })),
       domMarkers: [...state.domMarkers]
     }
-    try {
-      runtime.sendMessage({ type: 'DYNAMIC_PAGE_SNAPSHOT', snapshot }, () => {
-        const error = getRuntimeLastError()
-        if (error) {
-          handleSendFailure(error)
-        }
-      })
-    } catch (error) {
-      handleSendFailure(error)
-    }
+    messaging.sendMessage({ type: 'DYNAMIC_PAGE_SNAPSHOT', snapshot }, runtime).catch(handleSendFailure)
     perfMeasure('sp:send-snapshot', 'sp:send-start', {
       resources: state.resources.length,
       scripts: state.scripts.length,
@@ -714,5 +705,6 @@ export const runContentObserver = () => {
 }
 
 if (typeof window !== 'undefined' && typeof document !== 'undefined' && typeof chrome !== 'undefined') {
+  installRuntimeMessaging()
   runContentObserver()
 }

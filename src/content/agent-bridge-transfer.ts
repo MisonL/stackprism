@@ -6,8 +6,9 @@ import type {
   AgentProfileTransferCompleteMessage,
   SiteExperienceProfile
 } from '@/types/agent-bridge'
+import { AGENT_PROFILE_TRANSFER_PORT } from '@/types/agent-bridge'
+import { connectRuntimePort, postPortMessage, registerPortMessageListener } from '@/utils/messaging'
 
-const AGENT_PROFILE_TRANSFER_PORT = 'stackprism-agent-profile-transfer'
 const bridgeProtocolVersion = 1 as const
 interface BridgeTransferContext {
   bridgeOrigin: string
@@ -96,24 +97,25 @@ const isValidBeginMetadata = (message: AgentBridgeRuntimeMessage): boolean =>
   !transferState.has(message.profileTransferId)
 
 export const registerProfileTransferListener = (context: BridgeTransferContext, postStatus: StatusPoster, requestJson: BridgeRequester) => {
-  const port = chrome.runtime.connect({ name: AGENT_PROFILE_TRANSFER_PORT })
+  const port = connectRuntimePort(AGENT_PROFILE_TRANSFER_PORT)
   let terminal = false
-  port.postMessage({
+  postPortMessage(port, {
     type: 'AGENT_PROFILE_TRANSFER_PORT_HELLO',
     captureId: context.captureId,
     sessionId: context.sessionId,
     nonce: context.nonce,
     protocolVersion: bridgeProtocolVersion
   })
-  port.onMessage.addListener((message: AgentBridgeRuntimeMessage) => {
+  registerPortMessageListener(port, (message: AgentBridgeRuntimeMessage) => {
     if (!message?.type || !message.type.startsWith('AGENT_PROFILE_TRANSFER_') || message.type === 'AGENT_PROFILE_TRANSFER_ACK') return
     handleTransferMessage(context, postStatus, requestJson, message)
       .then(response => {
         if (message.type === 'AGENT_PROFILE_TRANSFER_COMPLETE' && response.ok) terminal = true
-        port.postMessage(toAckMessage(context, message, response))
+        postPortMessage(port, toAckMessage(context, message, response))
       })
       .catch(error =>
-        port.postMessage(
+        postPortMessage(
+          port,
           toAckMessage(context, message, {
             ok: false,
             error: makeError(

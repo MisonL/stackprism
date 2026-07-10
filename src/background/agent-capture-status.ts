@@ -1,5 +1,6 @@
 import type { AgentCaptureState } from './agent-capture-state'
 import { AGENT_BRIDGE_ERROR_CODES, bridgeProtocolVersion } from '@/types/agent-bridge'
+import { sendTabMessage } from '@/utils/messaging'
 import { sanitizeLogDetails } from './logging'
 
 type BridgeStatusPostError = Error & { details?: Record<string, unknown> }
@@ -28,7 +29,7 @@ export const postCaptureStatusToBridge = async (
   phase: AgentCaptureState['phase'],
   extra: Record<string, unknown> = {}
 ): Promise<void> => {
-  const response = await chrome.tabs.sendMessage(state.bridgeTabId, {
+  const response = await sendTabMessage(state.bridgeTabId, {
     type: 'AGENT_CAPTURE_STATUS',
     payload: {
       captureId: state.captureId,

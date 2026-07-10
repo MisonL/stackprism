@@ -17,10 +17,13 @@ export interface PopupResult {
   url: string
   title: string
   generatedAt: string
+  updatedAt: number
   technologies: TechnologyRecord[]
-  resources: PageDetectionResult['resources'] | null
-  headers: HeaderRecord[]
+  resources: { total: number }
+  headers?: HeaderRecord[]
   counts: PopupCounts
+  categoryCounts: Record<string, number>
+  headerCount: number
 }
 
 export interface PopupRawResult {

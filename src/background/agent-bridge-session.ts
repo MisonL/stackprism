@@ -239,7 +239,7 @@ export const validateRegisteredBridgeMessage = async (
 }
 
 export const validateStartAgentCaptureMessage = async (
-  message: StartAgentCaptureMessage & Record<string, unknown>,
+  message: StartAgentCaptureMessage,
   sender: chrome.runtime.MessageSender
 ): Promise<{ ok: true; session: BridgeSession } | { ok: false; error: AgentBridgeError }> => {
   const validated = await validateRegisteredBridgeMessage(message, sender)
